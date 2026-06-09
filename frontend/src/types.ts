@@ -30,6 +30,9 @@ export type FoodImageCandidate = {
 export type User = {
   id: number;
   username: string;
+  role: string;
+  is_active: boolean;
+  last_login_at: string | null;
   created_at: string;
 };
 
@@ -37,4 +40,13 @@ export type AuthResponse = {
   access_token: string;
   token_type: 'bearer';
   user: User;
+};
+
+export type AdminUserListItem = {
+  id: number;
+  username: string;
+  created_at: string;
+  food_count: number;
+  pick_log_count: number;
+  is_active: boolean;
 };

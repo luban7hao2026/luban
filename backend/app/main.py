@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.database import Base, engine
-from app.routes import auth, foods, picks
+from app.routes import admin, auth, foods, picks
 
 
 settings = get_settings()
@@ -24,6 +24,7 @@ app.add_middleware(
 Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")
 
+app.include_router(admin.router)
 app.include_router(auth.router)
 app.include_router(foods.router)
 app.include_router(picks.router)

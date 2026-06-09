@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -10,6 +12,7 @@ from app.security import create_access_token, get_current_user, hash_password, v
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 DEFAULT_TEMPLATE_USER_ID = 1
+ADMIN_ROLE = "admin"
 
 
 def _seed_default_foods(db: Session, user: User) -> None:
@@ -57,6 +60,29 @@ def login(payload: UserLogin, db: Session = Depends(get_db)) -> AuthToken:
     user = db.scalar(select(User).where(User.username == payload.username.strip()))
     if user is None or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is disabled")
+
+    user.last_login_at = datetime.now()
+    db.commit()
+    db.refresh(user)
+
+    return AuthToken(access_token=create_access_token(user), user=user)
+
+
+@router.post("/admin/login", response_model=AuthToken)
+def admin_login(payload: UserLogin, db: Session = Depends(get_db)) -> AuthToken:
+    user = db.scalar(select(User).where(User.username == payload.username.strip()))
+    if user is None or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is disabled")
+    if user.role != ADMIN_ROLE:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+
+    user.last_login_at = datetime.now()
+    db.commit()
+    db.refresh(user)
 
     return AuthToken(access_token=create_access_token(user), user=user)
 

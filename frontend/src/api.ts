@@ -1,4 +1,12 @@
-import type { AuthResponse, Food, FoodImageCandidate, PickLog, RandomPickResponse, User } from './types';
+import type {
+  AdminUserListItem,
+  AuthResponse,
+  Food,
+  FoodImageCandidate,
+  PickLog,
+  RandomPickResponse,
+  User,
+} from './types';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
 const AUTH_TOKEN_KEY = 'random_lunch_auth_token';
@@ -28,6 +36,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const message = await response.text();
+    if (response.status === 401 || response.status === 403) {
+      clearAuthToken();
+      window.dispatchEvent(new Event('auth:expired'));
+    }
     throw new Error(message || `Request failed: ${response.status}`);
   }
 
@@ -52,8 +64,61 @@ export async function loginUser(payload: { username: string; password: string })
   });
 }
 
+export async function loginAdmin(payload: { username: string; password: string }) {
+  return request<AuthResponse>('/auth/admin/login', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function getCurrentUser() {
   return request<User>('/auth/me');
+}
+
+export async function getAdminUsers() {
+  return request<AdminUserListItem[]>('/admin/users');
+}
+
+export async function updateAdminUserStatus(id: number, isActive: boolean) {
+  return request<User>(`/admin/users/${id}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({ is_active: isActive }),
+  });
+}
+
+export async function deleteAdminUser(id: number) {
+  return request<void>(`/admin/users/${id}`, { method: 'DELETE' });
+}
+
+export async function getAdminDefaultFoods(query = '') {
+  const search = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : '';
+  return request<Food[]>(`/admin/default-foods${search}`);
+}
+
+export async function createAdminDefaultFood(payload: {
+  name: string;
+  image_url?: string | null;
+  category?: string | null;
+  is_active?: boolean;
+}) {
+  return request<Food>('/admin/default-foods', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateAdminDefaultFood(
+  id: number,
+  payload: Partial<Pick<Food, 'name' | 'image_url' | 'category' | 'is_active'>>,
+) {
+  return request<Food>(`/admin/default-foods/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteAdminDefaultFood(id: number) {
+  return request<void>(`/admin/default-foods/${id}`, { method: 'DELETE' });
 }
 
 export async function getFoods() {

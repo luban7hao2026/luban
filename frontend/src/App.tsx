@@ -17,28 +17,37 @@ import {
   Sparkles,
   Trash2,
   UploadCloud,
+  Users,
   UtensilsCrossed,
   X,
 } from 'lucide-react';
 import {
   clearAuthToken,
+  createAdminDefaultFood,
   createFood,
+  deleteAdminDefaultFood,
+  deleteAdminUser,
   deleteFood,
   deletePickLogs,
   downloadFoodImage,
+  getAdminUsers,
+  getAdminDefaultFoods,
   getAuthToken,
   getCurrentUser,
   getFoods,
   getPickLogs,
+  loginAdmin,
   loginUser,
   pickRandomFood,
   registerUser,
   searchFoodImages,
   setAuthToken,
+  updateAdminUserStatus,
+  updateAdminDefaultFood,
   updateFood,
   uploadFoodImage,
 } from './api';
-import type { Food, FoodImageCandidate, PickLog, User } from './types';
+import type { AdminUserListItem, Food, FoodImageCandidate, PickLog, User } from './types';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
 const DEFAULT_FOOD_IMAGE = '/default-food.svg';
@@ -93,6 +102,13 @@ type FieldErrors = {
 const emptyForm = {
   name: '',
   category: '',
+};
+
+const emptyAdminFoodForm = {
+  name: '',
+  category: '',
+  image_url: '',
+  is_active: true,
 };
 
 function formatTime(value: string) {
@@ -1187,7 +1203,13 @@ function LunchApp({ currentUser, onLogout }: { currentUser: User; onLogout: () =
   );
 }
 
-function AuthScreen({ onAuthenticated }: { onAuthenticated: (user: User) => void }) {
+function AuthScreen({
+  adminOnly = false,
+  onAuthenticated,
+}: {
+  adminOnly?: boolean;
+  onAuthenticated: (user: User) => void;
+}) {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -1215,7 +1237,7 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (user: User) => void
     setError('');
     setNotice('');
     try {
-      if (mode === 'register') {
+      if (!adminOnly && mode === 'register') {
         await registerUser({ username: trimmedUsername, password });
         setMode('login');
         setPassword('');
@@ -1224,7 +1246,9 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (user: User) => void
         return;
       }
 
-      const auth = await loginUser({ username: trimmedUsername, password });
+      const auth = adminOnly
+        ? await loginAdmin({ username: trimmedUsername, password })
+        : await loginUser({ username: trimmedUsername, password });
       setAuthToken(auth.access_token);
       onAuthenticated(auth.user);
     } catch (err) {
@@ -1235,7 +1259,7 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (user: User) => void
   }
 
   function switchMode(nextMode: 'login' | 'register') {
-    setMode(nextMode);
+    setMode(adminOnly ? 'login' : nextMode);
     setError('');
     setNotice('');
     setPassword('');
@@ -1246,8 +1270,8 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (user: User) => void
     <div className="auth-page">
       <form className="auth-panel" onSubmit={handleSubmit}>
         <div>
-          <p className="eyebrow">Random Lunch</p>
-          <h1>{mode === 'login' ? 'Sign in' : 'Create account'}</h1>
+          <p className="eyebrow">{adminOnly ? 'Admin Console' : 'Random Lunch'}</p>
+          <h1>{adminOnly ? 'Admin sign in' : mode === 'login' ? 'Sign in' : 'Create account'}</h1>
         </div>
 
         <label className="field">
@@ -1270,7 +1294,7 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (user: User) => void
           />
         </label>
 
-        {mode === 'register' && (
+        {!adminOnly && mode === 'register' && (
           <label className="field">
             <span>Confirm password</span>
             <input
@@ -1286,17 +1310,526 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (user: User) => void
         {error && <div className="error-copy">{error}</div>}
 
         <button className="primary-button auth-submit" type="submit" disabled={submitting}>
-          {submitting ? 'Working...' : mode === 'login' ? 'Sign in' : 'Register'}
+          {submitting ? 'Working...' : adminOnly ? 'Sign in as admin' : mode === 'login' ? 'Sign in' : 'Register'}
         </button>
 
-        <button
-          className="auth-link"
-          type="button"
-          onClick={() => switchMode(mode === 'login' ? 'register' : 'login')}
-        >
-          {mode === 'login' ? 'Create an account' : 'Back to sign in'}
-        </button>
+        {!adminOnly && (
+          <button
+            className="auth-link"
+            type="button"
+            onClick={() => switchMode(mode === 'login' ? 'register' : 'login')}
+          >
+            {mode === 'login' ? 'Create an account' : 'Back to sign in'}
+          </button>
+        )}
       </form>
+    </div>
+  );
+}
+
+function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: () => void }) {
+  const [usersOpen, setUsersOpen] = useState(false);
+  const [users, setUsers] = useState<AdminUserListItem[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersError, setUsersError] = useState('');
+  const [actingUserId, setActingUserId] = useState<number | null>(null);
+  const [foodsOpen, setFoodsOpen] = useState(false);
+  const [foodView, setFoodView] = useState<'default' | 'create'>('default');
+  const [adminFoods, setAdminFoods] = useState<Food[]>([]);
+  const [foodSearch, setFoodSearch] = useState('');
+  const [foodLoading, setFoodLoading] = useState(false);
+  const [foodError, setFoodError] = useState('');
+  const [foodSubmitting, setFoodSubmitting] = useState(false);
+  const [editingDefaultFood, setEditingDefaultFood] = useState<Food | null>(null);
+  const [foodForm, setFoodForm] = useState(emptyAdminFoodForm);
+  const [foodImageFile, setFoodImageFile] = useState<File | null>(null);
+  const adminFoodPreviewUrl = useMemo(() => {
+    if (!foodImageFile) return '';
+    return URL.createObjectURL(foodImageFile);
+  }, [foodImageFile]);
+  const adminFoodPreviewImage = adminFoodPreviewUrl || (foodForm.image_url ? getImageSrc(foodForm.image_url) : DEFAULT_FOOD_IMAGE);
+
+  useEffect(() => {
+    return () => {
+      if (adminFoodPreviewUrl) URL.revokeObjectURL(adminFoodPreviewUrl);
+    };
+  }, [adminFoodPreviewUrl]);
+
+  async function loadUsers() {
+    setUsersLoading(true);
+    setUsersError('');
+    try {
+      const data = await getAdminUsers();
+      setUsers(data);
+    } catch (err) {
+      setUsersError(err instanceof Error ? err.message : 'Failed to load users.');
+    } finally {
+      setUsersLoading(false);
+    }
+  }
+
+  async function toggleUsers() {
+    const nextOpen = !usersOpen;
+    setUsersOpen(nextOpen);
+    if (nextOpen) setFoodsOpen(false);
+    if (!nextOpen || users.length > 0 || usersLoading) return;
+
+    await loadUsers();
+  }
+
+  async function loadDefaultFoods(query = foodSearch) {
+    setFoodLoading(true);
+    setFoodError('');
+    try {
+      setAdminFoods(await getAdminDefaultFoods(query));
+    } catch (err) {
+      setFoodError(err instanceof Error ? err.message : 'Failed to load foods.');
+    } finally {
+      setFoodLoading(false);
+    }
+  }
+
+  async function toggleFoods() {
+    const nextOpen = !foodsOpen;
+    setFoodsOpen(nextOpen);
+    if (nextOpen) setUsersOpen(false);
+    if (!nextOpen || adminFoods.length > 0 || foodLoading) return;
+
+    await loadDefaultFoods();
+  }
+
+  async function toggleUserStatus(user: AdminUserListItem) {
+    const action = user.is_active ? '禁用' : '启用';
+    if (!window.confirm(`确定${action}用户「${user.username}」吗？`)) return;
+
+    setActingUserId(user.id);
+    setUsersError('');
+    try {
+      await updateAdminUserStatus(user.id, !user.is_active);
+      await loadUsers();
+    } catch (err) {
+      setUsersError(err instanceof Error ? err.message : 'Failed to update user status.');
+    } finally {
+      setActingUserId(null);
+    }
+  }
+
+  async function removeUser(user: AdminUserListItem) {
+    if (!window.confirm(`确定删除用户「${user.username}」吗？这会同时删除该用户的食物和抽取记录。`)) return;
+
+    setActingUserId(user.id);
+    setUsersError('');
+    try {
+      await deleteAdminUser(user.id);
+      await loadUsers();
+    } catch (err) {
+      setUsersError(err instanceof Error ? err.message : 'Failed to delete user.');
+    } finally {
+      setActingUserId(null);
+    }
+  }
+
+  function startCreateFood() {
+    setEditingDefaultFood(null);
+    setFoodForm(emptyAdminFoodForm);
+    setFoodImageFile(null);
+    setFoodView('create');
+    setFoodError('');
+  }
+
+  function startEditFood(food: Food) {
+    setEditingDefaultFood(food);
+    setFoodForm({
+      name: food.name,
+      category: food.category ?? '',
+      image_url: food.image_url ?? '',
+      is_active: food.is_active,
+    });
+    setFoodImageFile(null);
+    setFoodView('create');
+    setFoodError('');
+  }
+
+  async function submitDefaultFood(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = foodForm.name.trim();
+    if (!name) {
+      setFoodError('食物名称不能为空。');
+      return;
+    }
+
+    setFoodSubmitting(true);
+    setFoodError('');
+    try {
+      let imageUrl = foodForm.image_url.trim() || null;
+      if (foodImageFile) {
+        const uploaded = await uploadFoodImage(foodImageFile);
+        imageUrl = uploaded.image_url;
+      }
+
+      const payload = {
+        name,
+        category: foodForm.category.trim() || null,
+        image_url: imageUrl,
+        is_active: foodForm.is_active,
+      };
+
+      if (editingDefaultFood) {
+        await updateAdminDefaultFood(editingDefaultFood.id, payload);
+      } else {
+        await createAdminDefaultFood(payload);
+      }
+
+      setFoodForm(emptyAdminFoodForm);
+      setFoodImageFile(null);
+      setEditingDefaultFood(null);
+      setFoodView('default');
+      await loadDefaultFoods();
+    } catch (err) {
+      setFoodError(err instanceof Error ? err.message : 'Failed to save food.');
+    } finally {
+      setFoodSubmitting(false);
+    }
+  }
+
+  async function removeDefaultFood(food: Food) {
+    if (!window.confirm(`确定删除默认食物「${food.name}」吗？这只会删除默认模板，不会删除已有用户的复制数据。`)) return;
+
+    setFoodError('');
+    try {
+      await deleteAdminDefaultFood(food.id);
+      await loadDefaultFoods();
+    } catch (err) {
+      setFoodError(err instanceof Error ? err.message : 'Failed to delete food.');
+    }
+  }
+
+  return (
+    <div className="admin-page">
+      <aside className="admin-sidebar">
+        <div className="admin-brand">
+          <p className="eyebrow">Admin Console</p>
+          <strong>后台管理</strong>
+        </div>
+
+        <button className={`admin-nav-button ${usersOpen ? 'active' : ''}`} type="button" onClick={toggleUsers}>
+          <Users size={18} />
+          用户列表
+        </button>
+
+        <button className={`admin-nav-button ${foodsOpen ? 'active' : ''}`} type="button" onClick={toggleFoods}>
+          <UtensilsCrossed size={18} />
+          食物列表
+        </button>
+
+        <div className="admin-sidebar-footer">
+          <div className="admin-identity">
+            <span>当前管理员</span>
+            <strong>{currentUser.username}</strong>
+          </div>
+          <button className="admin-logout" type="button" onClick={onLogout}>
+            <LogOut size={16} />
+            Logout
+          </button>
+        </div>
+      </aside>
+
+      <main className="admin-main">
+        <header className="admin-topbar">
+          <div>
+            <p className="eyebrow">Overview</p>
+            <h1>{usersOpen ? '用户列表' : foodsOpen ? '食物列表' : '后台首页'}</h1>
+          </div>
+        </header>
+
+        {usersOpen ? (
+          <section className="admin-table-panel">
+            <div className="admin-panel-header">
+              <div>
+                <h2>普通用户</h2>
+                <span>管理员账号不会显示在这里</span>
+              </div>
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={async () => {
+                  setUsersLoading(true);
+                  setUsersError('');
+                  try {
+                    await loadUsers();
+                  } catch (err) {
+                    setUsersError(err instanceof Error ? err.message : 'Failed to load users.');
+                  } finally {
+                    setUsersLoading(false);
+                  }
+                }}
+              >
+                <RefreshCcw size={15} />
+                刷新
+              </button>
+            </div>
+
+            {usersError && <div className="error-copy">{usersError}</div>}
+
+            <div className="admin-table-wrap">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>用户 ID</th>
+                    <th>用户名</th>
+                    <th>注册时间</th>
+                    <th>食物数量</th>
+                    <th>抽取记录数量</th>
+                    <th>启用状态</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {usersLoading ? (
+                    <tr>
+                      <td colSpan={7}>加载中...</td>
+                    </tr>
+                  ) : users.length === 0 ? (
+                    <tr>
+                      <td colSpan={7}>暂无普通用户</td>
+                    </tr>
+                  ) : (
+                    users.map((user) => (
+                      <tr key={user.id}>
+                        <td>{user.id}</td>
+                        <td>{user.username}</td>
+                        <td>{formatTime(user.created_at)}</td>
+                        <td>{user.food_count}</td>
+                        <td>{user.pick_log_count}</td>
+                        <td>
+                          <span className={user.is_active ? 'admin-status active' : 'admin-status'}>
+                            {user.is_active ? '启用' : '停用'}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="admin-row-actions">
+                            <button
+                              type="button"
+                              className={user.is_active ? 'admin-small-button warning' : 'admin-small-button'}
+                              disabled={actingUserId === user.id}
+                              onClick={() => toggleUserStatus(user)}
+                            >
+                              {user.is_active ? '禁用' : '启用'}
+                            </button>
+                            <button
+                              type="button"
+                              className="admin-small-button danger"
+                              disabled={actingUserId === user.id}
+                              onClick={() => removeUser(user)}
+                            >
+                              删除
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ) : foodsOpen ? (
+          <section className="admin-table-panel">
+            <div className="admin-panel-header">
+              <div>
+                <h2>默认食物</h2>
+                <span>这里管理新用户注册时复制的默认模板食物</span>
+              </div>
+              <div className="admin-sub-tabs">
+                <button
+                  type="button"
+                  className={foodView === 'default' ? 'active' : ''}
+                  onClick={() => {
+                    setFoodView('default');
+                    setEditingDefaultFood(null);
+                    setFoodForm(emptyAdminFoodForm);
+                    setFoodImageFile(null);
+                  }}
+                >
+                  默认食物
+                </button>
+                <button type="button" className={foodView === 'create' ? 'active' : ''} onClick={startCreateFood}>
+                  新增食物
+                </button>
+              </div>
+            </div>
+
+            {foodError && <div className="error-copy">{foodError}</div>}
+
+            {foodView === 'default' ? (
+              <>
+                <div className="admin-food-toolbar">
+                  <label className="admin-searchbox">
+                    <Search size={16} />
+                    <input
+                      value={foodSearch}
+                      onChange={(event) => setFoodSearch(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          void loadDefaultFoods(foodSearch);
+                        }
+                      }}
+                      placeholder="按食物名称搜索"
+                    />
+                  </label>
+                  <button className="secondary-button" type="button" onClick={() => loadDefaultFoods(foodSearch)}>
+                    <Search size={15} />
+                    搜索
+                  </button>
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={() => {
+                      setFoodSearch('');
+                      void loadDefaultFoods('');
+                    }}
+                  >
+                    <RefreshCcw size={15} />
+                    重置
+                  </button>
+                </div>
+
+                <div className="admin-table-wrap">
+                  <table className="admin-table admin-food-table">
+                    <thead>
+                      <tr>
+                        <th>图片</th>
+                        <th>食物名称</th>
+                        <th>分类</th>
+                        <th>创建时间</th>
+                        <th>操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {foodLoading ? (
+                        <tr>
+                          <td colSpan={5}>加载中...</td>
+                        </tr>
+                      ) : adminFoods.length === 0 ? (
+                        <tr>
+                          <td colSpan={5}>暂无默认食物</td>
+                        </tr>
+                      ) : (
+                        adminFoods.map((food) => (
+                          <tr key={food.id}>
+                            <td>
+                              <div className="admin-food-thumb">
+                                <FoodImage src={getImageSrc(food.image_url)} alt={food.name} />
+                              </div>
+                            </td>
+                            <td>{food.name}</td>
+                            <td>{food.category || '未分类'}</td>
+                            <td>{formatTime(food.created_at)}</td>
+                            <td>
+                              <div className="admin-row-actions">
+                                <button type="button" className="admin-small-button" onClick={() => startEditFood(food)}>
+                                  更新
+                                </button>
+                                <button
+                                  type="button"
+                                  className="admin-small-button danger"
+                                  onClick={() => removeDefaultFood(food)}
+                                >
+                                  删除
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : (
+              <form className="admin-food-form" onSubmit={submitDefaultFood}>
+                <div className="admin-form-grid">
+                  <label className="field">
+                    <span>食物名称</span>
+                    <input
+                      value={foodForm.name}
+                      onChange={(event) => setFoodForm({ ...foodForm, name: event.target.value })}
+                      placeholder="例如：牛肉"
+                    />
+                  </label>
+                  <label className="field">
+                    <span>分类</span>
+                    <input
+                      value={foodForm.category}
+                      onChange={(event) => setFoodForm({ ...foodForm, category: event.target.value })}
+                      placeholder="例如：肉"
+                    />
+                  </label>
+                  <label className="field admin-wide-field">
+                    <span>图片 URL</span>
+                    <input
+                      value={foodForm.image_url}
+                      onChange={(event) => {
+                        setFoodForm({ ...foodForm, image_url: event.target.value });
+                        if (event.target.value.trim()) setFoodImageFile(null);
+                      }}
+                      placeholder="/uploads/example.jpg 或 https://..."
+                    />
+                  </label>
+                  <label className="admin-file-field admin-wide-field">
+                    <UploadCloud size={18} />
+                    <span>{foodImageFile ? foodImageFile.name : '选择本地图片'}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0] ?? null;
+                        setFoodImageFile(file);
+                        if (file) {
+                          setFoodForm({ ...foodForm, image_url: '' });
+                        }
+                      }}
+                    />
+                  </label>
+                  <div className="admin-food-preview admin-wide-field">
+                    <FoodImage src={adminFoodPreviewImage} alt="食物图片预览" />
+                  </div>
+                  <label className="admin-check-field">
+                    <input
+                      type="checkbox"
+                      checked={foodForm.is_active}
+                      onChange={(event) => setFoodForm({ ...foodForm, is_active: event.target.checked })}
+                    />
+                    启用
+                  </label>
+                </div>
+                <div className="admin-form-actions">
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={() => {
+                      setFoodView('default');
+                      setEditingDefaultFood(null);
+                      setFoodForm(emptyAdminFoodForm);
+                      setFoodImageFile(null);
+                    }}
+                  >
+                    取消
+                  </button>
+                  <button className="primary-button" type="submit" disabled={foodSubmitting}>
+                    {foodSubmitting ? '保存中...' : editingDefaultFood ? '更新食物' : '新增食物'}
+                  </button>
+                </div>
+              </form>
+            )}
+          </section>
+        ) : (
+          <section className="admin-empty-panel">
+            <h2>选择左侧菜单</h2>
+            <p>点击左侧菜单查看用户或默认食物，再次点击可收起。</p>
+          </section>
+        )}
+      </main>
     </div>
   );
 }
@@ -1304,6 +1837,7 @@ function AuthScreen({ onAuthenticated }: { onAuthenticated: (user: User) => void
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
+  const isAdminPath = window.location.pathname.startsWith('/admin');
 
   useEffect(() => {
     const token = getAuthToken();
@@ -1329,6 +1863,28 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    function handleAuthExpired() {
+      setCurrentUser(null);
+    }
+
+    window.addEventListener('auth:expired', handleAuthExpired);
+    return () => window.removeEventListener('auth:expired', handleAuthExpired);
+  }, []);
+
+  useEffect(() => {
+    if (!currentUser || isAdminPath) return;
+
+    const timer = window.setInterval(() => {
+      getCurrentUser().catch(() => {
+        clearAuthToken();
+        setCurrentUser(null);
+      });
+    }, 10000);
+
+    return () => window.clearInterval(timer);
+  }, [currentUser, isAdminPath]);
+
   function handleLogout() {
     clearAuthToken();
     setCurrentUser(null);
@@ -1346,7 +1902,15 @@ export default function App() {
   }
 
   if (!currentUser) {
-    return <AuthScreen onAuthenticated={setCurrentUser} />;
+    return <AuthScreen adminOnly={isAdminPath} onAuthenticated={setCurrentUser} />;
+  }
+
+  if (isAdminPath) {
+    if (currentUser.role !== 'admin') {
+      return <AuthScreen adminOnly onAuthenticated={setCurrentUser} />;
+    }
+
+    return <AdminShell currentUser={currentUser} onLogout={handleLogout} />;
   }
 
   return <LunchApp currentUser={currentUser} onLogout={handleLogout} />;

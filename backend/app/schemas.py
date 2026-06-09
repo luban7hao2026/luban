@@ -131,6 +131,9 @@ class UserOut(BaseModel):
 
     id: int
     username: str
+    role: str
+    is_active: bool
+    last_login_at: datetime | None = None
     created_at: datetime
 
 
@@ -138,3 +141,16 @@ class AuthToken(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserOut
+
+
+class AdminUserListItem(BaseModel):
+    id: int
+    username: str
+    created_at: datetime
+    food_count: int
+    pick_log_count: int
+    is_active: bool
+
+
+class AdminUserStatusUpdate(BaseModel):
+    is_active: bool
