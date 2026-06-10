@@ -100,9 +100,11 @@ const WHEEL_COLORS = [
 ];
 
 const THEME_OPTIONS = [
+  { id: 'glass', title: '毛玻璃渐变', subtitle: 'Glassmorphism' },
+  { id: 'aurora', title: '极光蓝紫', subtitle: 'Aurora' },
+  { id: 'sunset', title: '暖橙黄昏', subtitle: 'Sunset' },
   { id: 'dark', title: '暗色极简', subtitle: 'Dark Minimal' },
   { id: 'bento', title: 'Bento 奶油', subtitle: 'Bento Cream' },
-  { id: 'glass', title: '毛玻璃渐变', subtitle: 'Glassmorphism' },
 ] as const;
 
 const PICK_LOG_LIMIT = 50;
@@ -295,7 +297,7 @@ function LunchWheel({ foods, pointerAngle }: { foods: Food[]; pointerAngle: numb
 }
 
 function LunchApp({ currentUser, onLogout }: { currentUser: User; onLogout: () => void }) {
-  const [theme, setTheme] = useState<ThemeId>('dark');
+  const [theme, setTheme] = useState<ThemeId>('glass');
   const [foods, setFoods] = useState<Food[]>([]);
   const [logs, setLogs] = useState<PickLog[]>([]);
   const [selectedLogIds, setSelectedLogIds] = useState<number[]>([]);
@@ -2585,7 +2587,6 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const authExpiryPromptShownRef = useRef(false);
   const isAdminPath = window.location.pathname.startsWith('/admin');
 
   useEffect(() => {
@@ -2599,7 +2600,6 @@ export default function App() {
     getCurrentUser()
       .then((user) => {
         if (!cancelled) {
-          authExpiryPromptShownRef.current = false;
           setCurrentUser(user);
         }
       })
@@ -2624,25 +2624,7 @@ export default function App() {
     return () => window.removeEventListener('auth:expired', handleAuthExpired);
   }, []);
 
-  useEffect(() => {
-    if (!currentUser) return;
-
-    const timer = window.setInterval(() => {
-      getCurrentUser().catch(() => {
-        if (!authExpiryPromptShownRef.current) {
-          authExpiryPromptShownRef.current = true;
-          window.alert('请重新登录');
-        }
-        clearAuthToken();
-        setCurrentUser(null);
-      });
-    }, 5000);
-
-    return () => window.clearInterval(timer);
-  }, [currentUser]);
-
   function handleLogout() {
-    authExpiryPromptShownRef.current = false;
     clearAuthToken();
     setCurrentUser(null);
   }
