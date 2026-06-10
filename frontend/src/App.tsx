@@ -108,6 +108,7 @@ const THEME_OPTIONS = [
 const PICK_LOG_LIMIT = 50;
 const LOGS_PER_PAGE = 5;
 const FOODS_PER_PAGE = 6;
+const ADMIN_TABLE_PAGE_SIZE = 6;
 
 type ThemeId = (typeof THEME_OPTIONS)[number]['id'];
 type ImageMode = 'default' | 'manual';
@@ -1369,6 +1370,10 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
   const [adminUserFoods, setAdminUserFoods] = useState<AdminUserFoodListItem[]>([]);
   const [foodSearch, setFoodSearch] = useState('');
   const [userFoodSearch, setUserFoodSearch] = useState('');
+  const [selectedUserFoodUserId, setSelectedUserFoodUserId] = useState<number | null>(null);
+  const [adminUsersPage, setAdminUsersPage] = useState(1);
+  const [adminFoodsPage, setAdminFoodsPage] = useState(1);
+  const [adminPermissionsPage, setAdminPermissionsPage] = useState(1);
   const [foodLoading, setFoodLoading] = useState(false);
   const [foodError, setFoodError] = useState('');
   const [foodSubmitting, setFoodSubmitting] = useState(false);
@@ -1393,6 +1398,33 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
     return URL.createObjectURL(foodImageFile);
   }, [foodImageFile]);
   const adminFoodPreviewImage = adminFoodPreviewUrl || (foodForm.image_url ? getImageSrc(foodForm.image_url) : DEFAULT_FOOD_IMAGE);
+  const selectedUserFoodUser = useMemo(
+    () => users.find((user) => user.id === selectedUserFoodUserId) ?? null,
+    [selectedUserFoodUserId, users],
+  );
+  const visibleUserFoods = useMemo(() => {
+    if (selectedUserFoodUserId === null) return [];
+    return adminUserFoods.filter((food) => food.user_id === selectedUserFoodUserId);
+  }, [adminUserFoods, selectedUserFoodUserId]);
+  const totalAdminUsersPages = Math.max(1, Math.ceil(users.length / ADMIN_TABLE_PAGE_SIZE));
+  const currentAdminUsersPage = Math.min(adminUsersPage, totalAdminUsersPages);
+  const pagedAdminUsers = useMemo(() => {
+    const start = (currentAdminUsersPage - 1) * ADMIN_TABLE_PAGE_SIZE;
+    return users.slice(start, start + ADMIN_TABLE_PAGE_SIZE);
+  }, [currentAdminUsersPage, users]);
+  const totalAdminPermissionsPages = Math.max(1, Math.ceil(users.length / ADMIN_TABLE_PAGE_SIZE));
+  const currentAdminPermissionsPage = Math.min(adminPermissionsPage, totalAdminPermissionsPages);
+  const pagedAdminPermissionUsers = useMemo(() => {
+    const start = (currentAdminPermissionsPage - 1) * ADMIN_TABLE_PAGE_SIZE;
+    return users.slice(start, start + ADMIN_TABLE_PAGE_SIZE);
+  }, [currentAdminPermissionsPage, users]);
+  const adminFoodRows = foodScope === 'default' ? adminFoods : visibleUserFoods;
+  const totalAdminFoodPages = Math.max(1, Math.ceil(adminFoodRows.length / ADMIN_TABLE_PAGE_SIZE));
+  const currentAdminFoodPage = Math.min(adminFoodsPage, totalAdminFoodPages);
+  const pagedAdminFoodRows = useMemo(() => {
+    const start = (currentAdminFoodPage - 1) * ADMIN_TABLE_PAGE_SIZE;
+    return adminFoodRows.slice(start, start + ADMIN_TABLE_PAGE_SIZE);
+  }, [adminFoodRows, currentAdminFoodPage]);
 
   useEffect(() => {
     return () => {
@@ -1403,6 +1435,30 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
   useEffect(() => {
     void loadDashboard();
   }, []);
+
+  useEffect(() => {
+    if (foodScope !== 'user') return;
+    if (users.length === 0) {
+      if (selectedUserFoodUserId !== null) setSelectedUserFoodUserId(null);
+      return;
+    }
+    if (selectedUserFoodUserId === null || !users.some((user) => user.id === selectedUserFoodUserId)) {
+      const preferredUser = users.find((user) => user.id === currentUser.id) ?? users[0];
+      setSelectedUserFoodUserId(preferredUser.id);
+    }
+  }, [currentUser.id, foodScope, selectedUserFoodUserId, users]);
+
+  useEffect(() => {
+    setAdminUsersPage((page) => Math.min(page, totalAdminUsersPages));
+  }, [totalAdminUsersPages]);
+
+  useEffect(() => {
+    setAdminPermissionsPage((page) => Math.min(page, totalAdminPermissionsPages));
+  }, [totalAdminPermissionsPages]);
+
+  useEffect(() => {
+    setAdminFoodsPage((page) => Math.min(page, totalAdminFoodPages));
+  }, [totalAdminFoodPages]);
 
   async function loadDashboard() {
     setDashboardLoading(true);
@@ -1422,8 +1478,10 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
     try {
       const data = await getAdminUsers();
       setUsers(data);
+      return data;
     } catch (err) {
       setUsersError(err instanceof Error ? err.message : 'Failed to load users.');
+      return null;
     } finally {
       setUsersLoading(false);
     }
@@ -1434,6 +1492,7 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
     setUsersOpen(nextOpen);
     if (nextOpen) setFoodsOpen(false);
     if (nextOpen) setPermissionsOpen(false);
+    if (nextOpen) setAdminUsersPage(1);
     if (!nextOpen || users.length > 0 || usersLoading) return;
 
     await loadUsers();
@@ -1464,9 +1523,12 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
     setFoodLoading(true);
     setFoodError('');
     try {
-      setAdminUserFoods(await getAdminUserFoods(query));
+      const data = await getAdminUserFoods(query);
+      setAdminUserFoods(data);
+      return data;
     } catch (err) {
       setFoodError(err instanceof Error ? err.message : 'Failed to load user foods.');
+      return null;
     } finally {
       setFoodLoading(false);
     }
@@ -1487,6 +1549,7 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
     setPermissionsOpen(true);
     setUsersOpen(false);
     setFoodsOpen(false);
+    setAdminPermissionsPage(1);
     if (users.length === 0 && !usersLoading) {
       await loadUsers();
     }
@@ -1495,6 +1558,7 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
   async function openDefaultFoods() {
     setFoodScope('default');
     setFoodView('default');
+    setAdminFoodsPage(1);
     setEditingDefaultFood(null);
     setFoodForm(emptyAdminFoodForm);
     setFoodImageFile(null);
@@ -1506,12 +1570,28 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
   async function openUserFoods() {
     setFoodScope('user');
     setFoodView('default');
+    setAdminFoodsPage(1);
     setEditingDefaultFood(null);
     setFoodForm(emptyAdminFoodForm);
     setFoodImageFile(null);
+    const usersData = users.length === 0 && !usersLoading ? await loadUsers() : users;
+    if (usersData && usersData.length > 0 && selectedUserFoodUserId === null) {
+      const preferredUser = usersData.find((user) => user.id === currentUser.id) ?? usersData[0];
+      setSelectedUserFoodUserId(preferredUser.id);
+    }
     if (adminUserFoods.length === 0 && !foodLoading) {
       await loadUserFoods();
     }
+  }
+
+  function selectUserFoodUser(user: AdminUserListItem) {
+    setSelectedUserFoodUserId(user.id);
+    setAdminFoodsPage(1);
+    setFoodView('default');
+    setEditingDefaultFood(null);
+    setFoodForm(emptyAdminFoodForm);
+    setFoodImageFile(null);
+    setFoodError('');
   }
 
   async function toggleUserStatus(user: AdminUserListItem) {
@@ -1754,6 +1834,38 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
     }
   }
 
+  function renderAdminPagination(
+    ariaLabel: string,
+    currentPage: number,
+    totalPages: number,
+    totalItems: number,
+    setPage: (updater: (page: number) => number) => void,
+  ) {
+    return (
+      <div className="pagination-controls admin-pagination" aria-label={ariaLabel}>
+        <span>
+          第 {currentPage} 页，共 {totalPages} 页，{totalItems} 条
+        </span>
+        <button
+          type="button"
+          title="上一页"
+          disabled={currentPage === 1}
+          onClick={() => setPage((page) => Math.max(1, page - 1))}
+        >
+          <ChevronLeft size={14} />
+        </button>
+        <button
+          type="button"
+          title="下一页"
+          disabled={currentPage === totalPages}
+          onClick={() => setPage((page) => Math.min(totalPages, page + 1))}
+        >
+          <ChevronRight size={14} />
+        </button>
+      </div>
+    );
+  }
+
   return (
     <>
     <div className="admin-page">
@@ -1794,6 +1906,27 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
             >
               用户食物
             </button>
+            {foodScope === 'user' && (
+              <div className="admin-user-food-menu">
+                {usersLoading ? (
+                  <span className="admin-subnav-empty">加载用户...</span>
+                ) : users.length === 0 ? (
+                  <span className="admin-subnav-empty">暂无用户</span>
+                ) : (
+                  users.map((user) => (
+                    <button
+                      key={user.id}
+                      type="button"
+                      className={selectedUserFoodUserId === user.id ? 'active' : ''}
+                      onClick={() => selectUserFoodUser(user)}
+                    >
+                      <span>{user.username}</span>
+                      <small>ID {user.id}</small>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -1836,10 +1969,19 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
                 <h2>用户权限</h2>
                 <span>管理用户角色、密码和账号删除</span>
               </div>
-              <button className="secondary-button" type="button" onClick={() => void loadUsers()}>
-                <RefreshCcw size={15} />
-                刷新
-              </button>
+              <div className="admin-panel-actions">
+                {renderAdminPagination(
+                  '用户权限分页',
+                  currentAdminPermissionsPage,
+                  totalAdminPermissionsPages,
+                  users.length,
+                  setAdminPermissionsPage,
+                )}
+                <button className="secondary-button" type="button" onClick={() => void loadUsers()}>
+                  <RefreshCcw size={15} />
+                  刷新
+                </button>
+              </div>
             </div>
 
             {usersError && <div className="error-copy">{usersError}</div>}
@@ -1866,7 +2008,7 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
                       <td colSpan={6}>暂无用户</td>
                     </tr>
                   ) : (
-                    users.map((user) => (
+                    pagedAdminPermissionUsers.map((user) => (
                       <tr key={user.id}>
                         <td>{user.id}</td>
                         <td>{user.username}</td>
@@ -1919,24 +2061,19 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
                 <h2>用户列表</h2>
                 <span>{isAdmin ? '管理员可以管理用户状态' : '当前角色仅可查看用户列表'}</span>
               </div>
-              <button
-                className="secondary-button"
-                type="button"
-                onClick={async () => {
-                  setUsersLoading(true);
-                  setUsersError('');
-                  try {
-                    await loadUsers();
-                  } catch (err) {
-                    setUsersError(err instanceof Error ? err.message : 'Failed to load users.');
-                  } finally {
-                    setUsersLoading(false);
-                  }
-                }}
-              >
-                <RefreshCcw size={15} />
-                刷新
-              </button>
+              <div className="admin-panel-actions">
+                {renderAdminPagination(
+                  '用户列表分页',
+                  currentAdminUsersPage,
+                  totalAdminUsersPages,
+                  users.length,
+                  setAdminUsersPage,
+                )}
+                <button className="secondary-button" type="button" onClick={() => void loadUsers()}>
+                  <RefreshCcw size={15} />
+                  刷新
+                </button>
+              </div>
             </div>
 
             {usersError && <div className="error-copy">{usersError}</div>}
@@ -1965,7 +2102,7 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
                       <td colSpan={8}>暂无用户</td>
                     </tr>
                   ) : (
-                    users.map((user) => (
+                    pagedAdminUsers.map((user) => (
                       <tr key={user.id}>
                         <td>{user.id}</td>
                         <td>{user.username}</td>
@@ -2009,7 +2146,9 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
                 <span>
                   {foodScope === 'default'
                     ? '这里管理新用户注册时复制的默认模板食物'
-                    : '这里管理普通用户各自拥有的食物'}
+                    : selectedUserFoodUser
+                      ? `当前查看 ${selectedUserFoodUser.username} 的食物清单`
+                      : '请先在左侧选择一个用户'}
                 </span>
               </div>
               {foodScope === 'default' && (
@@ -2053,6 +2192,7 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
                       }}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter') {
+                          setAdminFoodsPage(1);
                           if (foodScope === 'default') {
                             void loadDefaultFoods(foodSearch);
                           } else {
@@ -2066,7 +2206,10 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
                   <button
                     className="secondary-button"
                     type="button"
-                    onClick={() => (foodScope === 'default' ? loadDefaultFoods(foodSearch) : loadUserFoods(userFoodSearch))}
+                    onClick={() => {
+                      setAdminFoodsPage(1);
+                      return foodScope === 'default' ? loadDefaultFoods(foodSearch) : loadUserFoods(userFoodSearch);
+                    }}
                   >
                     <Search size={15} />
                     搜索
@@ -2077,6 +2220,7 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
                     onClick={() => {
                       setFoodSearch('');
                       setUserFoodSearch('');
+                      setAdminFoodsPage(1);
                       if (foodScope === 'default') {
                         void loadDefaultFoods('');
                       } else {
@@ -2087,6 +2231,13 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
                     <RefreshCcw size={15} />
                     重置
                   </button>
+                  {renderAdminPagination(
+                    '食物列表分页',
+                    currentAdminFoodPage,
+                    totalAdminFoodPages,
+                    adminFoodRows.length,
+                    setAdminFoodsPage,
+                  )}
                 </div>
 
                 <div className="admin-table-wrap">
@@ -2094,7 +2245,6 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
                     <thead>
                       <tr>
                         <th>图片</th>
-                        {foodScope === 'user' && <th>用户</th>}
                         <th>食物名称</th>
                         <th>分类</th>
                         <th>创建时间</th>
@@ -2104,16 +2254,20 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
                     <tbody>
                       {foodLoading ? (
                         <tr>
-                          <td colSpan={foodScope === 'user' ? 6 : 5}>加载中...</td>
+                          <td colSpan={5}>加载中...</td>
                         </tr>
-                      ) : (foodScope === 'default' ? adminFoods.length === 0 : adminUserFoods.length === 0) ? (
+                      ) : adminFoodRows.length === 0 ? (
                         <tr>
-                          <td colSpan={foodScope === 'user' ? 6 : 5}>
-                            {foodScope === 'default' ? '暂无默认食物' : '暂无用户食物'}
+                          <td colSpan={5}>
+                            {foodScope === 'default'
+                              ? '暂无默认食物'
+                              : selectedUserFoodUser
+                                ? `暂无 ${selectedUserFoodUser.username} 的食物`
+                                : '请先在左侧选择一个用户'}
                           </td>
                         </tr>
                       ) : (
-                        (foodScope === 'default' ? adminFoods : adminUserFoods).map((food) => {
+                        pagedAdminFoodRows.map((food) => {
                           const canManageFood =
                             foodScope === 'default'
                               ? isAdmin
@@ -2126,14 +2280,6 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
                                 <FoodImage src={getImageSrc(food.image_url)} alt={food.name} />
                               </div>
                             </td>
-                            {foodScope === 'user' && (
-                              <td>
-                                <div className="admin-user-cell">
-                                  <strong>{(food as AdminUserFoodListItem).username}</strong>
-                                  <span>ID {(food as AdminUserFoodListItem).user_id}</span>
-                                </div>
-                              </td>
-                            )}
                             <td>{food.name}</td>
                             <td>{food.category || '未分类'}</td>
                             <td>{formatTime(food.created_at)}</td>
