@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.database import get_db
 from app.models import Food, PickLog, User
 from app.schemas import PickLogDeleteIn, PickLogDeleteOut, PickLogOut, RandomPickOut
-from app.security import get_current_user
+from app.security import get_active_user, get_current_user
 
 
 router = APIRouter(prefix="/picks", tags=["picks"])
@@ -14,7 +14,7 @@ router = APIRouter(prefix="/picks", tags=["picks"])
 @router.post("/random", response_model=RandomPickOut)
 def pick_random_food(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_active_user),
 ) -> RandomPickOut:
     food = db.scalars(
         select(Food)
@@ -60,7 +60,7 @@ def list_pick_logs(
 def delete_pick_logs(
     payload: PickLogDeleteIn,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_active_user),
 ) -> PickLogDeleteOut:
     unique_ids = list(dict.fromkeys(payload.ids))
     result = db.execute(delete(PickLog).where(PickLog.id.in_(unique_ids), PickLog.user_id == current_user.id))

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Food, User
 from app.schemas import AuthToken, UserLogin, UserOut, UserPasswordChange, UserRegister
-from app.security import create_access_token, get_current_user, hash_password, verify_password
+from app.security import create_access_token, get_active_user, get_current_user, hash_password, verify_password
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -64,8 +64,6 @@ def login(payload: UserLogin, db: Session = Depends(get_db)) -> AuthToken:
     user = db.scalar(select(User).where(User.username == payload.username.strip()))
     if user is None or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
-    if not user.is_active:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is disabled")
 
     user.last_login_at = datetime.now()
     db.commit()
@@ -100,7 +98,7 @@ def read_current_user(current_user: User = Depends(get_current_user)) -> User:
 def change_password(
     payload: UserPasswordChange,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_active_user),
 ) -> User:
     if not verify_password(payload.current_password, current_user.password_hash):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")

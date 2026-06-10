@@ -37,8 +37,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    if (response.status === 401 || response.status === 403) {
+    const rawMessage = await response.text();
+    let message = rawMessage;
+    try {
+      const parsed = JSON.parse(rawMessage) as { detail?: string };
+      message = parsed.detail || rawMessage;
+    } catch {
+      message = rawMessage;
+    }
+    if (response.status === 401) {
       clearAuthToken();
       window.dispatchEvent(new Event('auth:expired'));
     }

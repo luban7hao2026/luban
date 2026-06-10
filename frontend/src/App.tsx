@@ -637,9 +637,9 @@ function LunchApp({ currentUser, onLogout }: { currentUser: User; onLogout: () =
         setLogs(freshLogs);
         setLogPage(1);
         window.setTimeout(() => setBusy(false), 1150);
-      } catch {
+      } catch (err) {
         setBusy(false);
-        setError('抽选失败，请稍后重试。');
+        setError(err instanceof Error ? err.message : '抽选失败，请稍后重试。');
       }
     }, 900);
   }
@@ -689,9 +689,13 @@ function LunchApp({ currentUser, onLogout }: { currentUser: User; onLogout: () =
   }
 
   async function toggleActive(food: Food) {
-    setError('');
-    await updateFood(food.id, { is_active: !food.is_active });
-    await refresh();
+    try {
+      setError('');
+      await updateFood(food.id, { is_active: !food.is_active });
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '更新失败，请稍后重试。');
+    }
   }
 
   function toggleLogSelected(logId: number) {
@@ -720,8 +724,8 @@ function LunchApp({ currentUser, onLogout }: { currentUser: User; onLogout: () =
       setSelectedLogIds([]);
       const freshLogs = await getPickLogs(PICK_LOG_LIMIT);
       setLogs(freshLogs);
-    } catch {
-      setError('删除抽选记录失败，请稍后重试。');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '删除抽选记录失败，请稍后重试。');
     }
   }
 
@@ -735,8 +739,8 @@ function LunchApp({ currentUser, onLogout }: { currentUser: User; onLogout: () =
         setSelected(null);
       }
       await refresh();
-    } catch {
-      setError('删除失败，请稍后重试。');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '删除失败，请稍后重试。');
     }
   }
 
@@ -1348,7 +1352,7 @@ function AuthScreen({
 }
 
 function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: () => void }) {
-  const isAdmin = currentUser.role === 'admin';
+  const isAdmin = currentUser.role === 'admin' && currentUser.is_active;
   const [dashboard, setDashboard] = useState<AdminDashboardStats | null>(null);
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [dashboardError, setDashboardError] = useState('');
@@ -1984,14 +1988,6 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
                                 onClick={() => toggleUserStatus(user)}
                               >
                                 {user.is_active ? '禁用' : '启用'}
-                              </button>
-                              <button
-                                type="button"
-                                className="admin-small-button danger"
-                                disabled={actingUserId === user.id}
-                                onClick={() => removeUser(user)}
-                              >
-                                删除
                               </button>
                             </div>
                           ) : (

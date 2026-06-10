@@ -19,7 +19,7 @@ from app.schemas import (
     FoodUpdate,
     UserOut,
 )
-from app.security import get_current_admin, get_current_user, hash_password
+from app.security import DISABLED_USER_MESSAGE, get_current_admin, get_current_user, hash_password
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -33,7 +33,7 @@ def _utc_now_naive() -> datetime:
 
 
 def _is_admin(user: User) -> bool:
-    return user.role == ADMIN_ROLE
+    return user.role == ADMIN_ROLE and user.is_active
 
 
 def _admin_count(db: Session) -> int:
@@ -146,7 +146,6 @@ def update_user_status(
         _ensure_not_last_admin_change(db, user)
 
     user.is_active = payload.is_active
-    user.credentials_updated_at = _utc_now_naive()
     db.commit()
     db.refresh(user)
     return user
@@ -282,6 +281,8 @@ def _get_user_food(db: Session, food_id: int) -> Food:
 
 def _ensure_can_manage_user_food(current_user: User, food: Food) -> None:
     if _is_admin(current_user) or food.user_id == current_user.id:
+        if not _is_admin(current_user) and not current_user.is_active:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=DISABLED_USER_MESSAGE)
         return
 
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only manage your own foods")

@@ -13,7 +13,7 @@ from app.config import get_settings
 from app.database import get_db
 from app.models import Food, PickLog, User
 from app.schemas import FoodCreate, FoodOut, FoodUpdate, ImageDownloadIn, ImageSearchResult, UploadOut
-from app.security import get_current_user
+from app.security import get_active_user, get_current_user
 
 
 router = APIRouter(prefix="/foods", tags=["foods"])
@@ -60,7 +60,7 @@ def list_foods(
 def create_food(
     payload: FoodCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_active_user),
 ) -> Food:
     food = Food(**payload.model_dump(), user_id=current_user.id)
     db.add(food)
@@ -74,7 +74,7 @@ def update_food(
     food_id: int,
     payload: FoodUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_active_user),
 ) -> Food:
     food = db.scalar(select(Food).where(Food.id == food_id, Food.user_id == current_user.id))
     if food is None:
@@ -92,7 +92,7 @@ def update_food(
 def delete_food(
     food_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_active_user),
 ) -> None:
     food = db.scalar(select(Food).where(Food.id == food_id, Food.user_id == current_user.id))
     if food is None:
@@ -210,7 +210,7 @@ def _search_commons_once(
 @router.post("/upload", response_model=UploadOut)
 async def upload_food_image(
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_active_user),
 ) -> UploadOut:
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(
@@ -242,7 +242,7 @@ async def upload_food_image(
 @router.post("/download-image", response_model=UploadOut)
 def download_food_image(
     payload: ImageDownloadIn,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_active_user),
 ) -> UploadOut:
     parsed = urlparse(payload.url)
     if parsed.scheme not in {"http", "https"}:

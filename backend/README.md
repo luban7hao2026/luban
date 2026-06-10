@@ -20,16 +20,18 @@ CREATE DATABASE random_lunch CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 Then update `.env` with your MySQL username and password.
 
-For existing databases, run the multi-user migration before starting the new
-auth-enabled backend:
+For existing databases, run the migrations before starting the current backend:
 
 ```sql
 SOURCE backend/migrations/001_multi_user_auth.sql;
+SOURCE backend/migrations/002_admin_user_fields.sql;
+SOURCE backend/migrations/003_credentials_updated_at.sql;
 ```
 
 The migration assigns existing foods and pick logs to a non-login
 `default-template` user. Each new real user receives a copied default food list
-on registration.
+on registration. Later migrations add roles, account status, last-login time,
+and credential timestamp based token invalidation.
 
 Set a private auth secret in `.env`:
 
