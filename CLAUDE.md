@@ -403,6 +403,7 @@ Admin console UI areas:
 - User list: status management only; the delete action is intentionally not shown here.
 - Food list with default-food and user-food scopes.
 - Permission/account management: user creation, role changes, password resets, and user deletion.
+- Frontend and admin delete/disable confirmations use the shared `ConfirmDialog` in `frontend/src/App.tsx`, styled as a glassmorphism modal in `frontend/src/styles.css`; do not use browser-native `window.confirm` for these flows.
 
 Keep the current single-file app structure unless the user explicitly asks for a refactor.
 
@@ -478,7 +479,7 @@ Frontend:
 - Use existing CSS classes and admin dark-theme conventions.
 - Use `lucide-react` icons when adding controls.
 - Avoid adding a router unless the user explicitly asks.
-- Keep admin destructive actions guarded by confirmation dialogs.
+- Keep destructive actions and user status changes guarded by the shared glass-style `ConfirmDialog`.
 - Clear auth token only on `401`; keep the user on the page for `403` so disabled-account and permission messages can be shown.
 - Keep Chinese UI copy consistent with nearby UI text when editing existing screens.
 

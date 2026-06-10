@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
+  AlertTriangle,
   Check,
   LayoutDashboard,
   ChevronDown,
@@ -120,6 +121,15 @@ type FieldErrors = {
   category?: string;
   image?: string;
 };
+type ConfirmTone = 'danger' | 'warning';
+type ConfirmDialogConfig = {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  cancelLabel?: string;
+  tone?: ConfirmTone;
+  onConfirm: () => void;
+};
 
 const emptyForm = {
   name: '',
@@ -177,6 +187,41 @@ function FoodImage({ src, alt }: { src: string; alt: string }) {
         event.currentTarget.src = DEFAULT_FOOD_IMAGE;
       }}
     />
+  );
+}
+
+function ConfirmDialog({
+  dialog,
+  onCancel,
+  onConfirm,
+}: {
+  dialog: ConfirmDialogConfig;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const tone = dialog.tone ?? 'danger';
+
+  return (
+    <div className="modal-backdrop confirm-backdrop" onClick={onCancel}>
+      <div className="modal panel-card confirm-modal" onClick={(event) => event.stopPropagation()}>
+        <div className={`confirm-icon ${tone}`}>
+          <AlertTriangle size={22} />
+        </div>
+        <div>
+          <p className="eyebrow">{tone === 'warning' ? 'Status' : 'Confirm'}</p>
+          <h2>{dialog.title}</h2>
+          <p>{dialog.message}</p>
+        </div>
+        <div className="modal-actions">
+          <button type="button" className="secondary-button" onClick={onCancel}>
+            {dialog.cancelLabel ?? '取消'}
+          </button>
+          <button type="button" className={`primary-button confirm-action ${tone}`} onClick={onConfirm}>
+            {dialog.confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -326,6 +371,7 @@ function LunchApp({ currentUser, onLogout }: { currentUser: User; onLogout: () =
   const [error, setError] = useState('');
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [submitting, setSubmitting] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogConfig | null>(null);
   const rollTimer = useRef<number | null>(null);
   const wheelAngleRef = useRef(0);
   const searchControlRef = useRef<HTMLDivElement | null>(null);
@@ -720,8 +766,18 @@ function LunchApp({ currentUser, onLogout }: { currentUser: User; onLogout: () =
 
   async function removeSelectedLogs() {
     if (selectedLogIds.length === 0) return;
-    if (!window.confirm(`删除选中的 ${selectedLogIds.length} 条抽选记录？`)) return;
+    setConfirmDialog({
+      title: '删除抽选记录',
+      message: `确定删除选中的 ${selectedLogIds.length} 条抽选记录吗？删除后不可恢复。`,
+      confirmLabel: '删除',
+      tone: 'danger',
+      onConfirm: () => {
+        void deleteSelectedLogs();
+      },
+    });
+  }
 
+  async function deleteSelectedLogs() {
     try {
       setError('');
       await deletePickLogs(selectedLogIds);
@@ -734,8 +790,18 @@ function LunchApp({ currentUser, onLogout }: { currentUser: User; onLogout: () =
   }
 
   async function removeFood(food: Food) {
-    if (!window.confirm(`删除「${food.name}」？`)) return;
+    setConfirmDialog({
+      title: '删除食物',
+      message: `确定删除「${food.name}」吗？相关抽选记录也会一并清理。`,
+      confirmLabel: '删除',
+      tone: 'danger',
+      onConfirm: () => {
+        void deleteOwnFood(food);
+      },
+    });
+  }
 
+  async function deleteOwnFood(food: Food) {
     try {
       setError('');
       await deleteFood(food.id);
@@ -751,6 +817,7 @@ function LunchApp({ currentUser, onLogout }: { currentUser: User; onLogout: () =
   const selectedCategory = selected?.category || '未分类';
 
   return (
+    <>
     <div className={`page theme-${theme}`}>
       <div className="theme-switcher" aria-label="主题选择">
         {THEME_OPTIONS.map((option) => (
@@ -1226,6 +1293,19 @@ function LunchApp({ currentUser, onLogout }: { currentUser: User; onLogout: () =
         </div>
       )}
     </div>
+
+    {confirmDialog && (
+      <ConfirmDialog
+        dialog={confirmDialog}
+        onCancel={() => setConfirmDialog(null)}
+        onConfirm={() => {
+          const action = confirmDialog.onConfirm;
+          setConfirmDialog(null);
+          action();
+        }}
+      />
+    )}
+    </>
   );
 }
 
@@ -1385,6 +1465,7 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
   const [foodImageFile, setFoodImageFile] = useState<File | null>(null);
   const [accountError, setAccountError] = useState('');
   const [accountSubmitting, setAccountSubmitting] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogConfig | null>(null);
   const [ownPasswordOpen, setOwnPasswordOpen] = useState(false);
   const [ownPasswordForm, setOwnPasswordForm] = useState({
     current_password: '',
@@ -1612,8 +1693,20 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
   async function toggleUserStatus(user: AdminUserListItem) {
     if (!isAdmin) return;
     const action = user.is_active ? '禁用' : '启用';
-    if (!window.confirm(`确定${action}用户「${user.username}」吗？`)) return;
+    setConfirmDialog({
+      title: `${action}用户`,
+      message: user.is_active
+        ? `确定禁用用户「${user.username}」吗？该用户仍可查看只读内容，但执行操作时会被拦截。`
+        : `确定启用用户「${user.username}」吗？启用后该用户可以恢复允许范围内的操作。`,
+      confirmLabel: action,
+      tone: user.is_active ? 'warning' : 'danger',
+      onConfirm: () => {
+        void updateUserStatus(user);
+      },
+    });
+  }
 
+  async function updateUserStatus(user: AdminUserListItem) {
     setActingUserId(user.id);
     setUsersError('');
     try {
@@ -1628,8 +1721,18 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
 
   async function removeUser(user: AdminUserListItem) {
     if (!isAdmin) return;
-    if (!window.confirm(`确定删除用户「${user.username}」吗？这会同时删除该用户的食物和抽取记录。`)) return;
+    setConfirmDialog({
+      title: '删除用户',
+      message: `确定删除用户「${user.username}」吗？这会同时删除该用户的食物和抽取记录。`,
+      confirmLabel: '删除',
+      tone: 'danger',
+      onConfirm: () => {
+        void deleteUserAccount(user);
+      },
+    });
+  }
 
+  async function deleteUserAccount(user: AdminUserListItem) {
     setActingUserId(user.id);
     setUsersError('');
     try {
@@ -1870,8 +1973,18 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
 
   async function removeDefaultFood(food: Food) {
     if (!isAdmin) return;
-    if (!window.confirm(`确定删除默认食物「${food.name}」吗？这只会删除默认模板，不会删除已有用户的复制数据。`)) return;
+    setConfirmDialog({
+      title: '删除默认食物',
+      message: `确定删除默认食物「${food.name}」吗？这只会删除默认模板，不会删除已有用户的复制数据。`,
+      confirmLabel: '删除',
+      tone: 'danger',
+      onConfirm: () => {
+        void deleteDefaultFoodTemplate(food);
+      },
+    });
+  }
 
+  async function deleteDefaultFoodTemplate(food: Food) {
     setFoodError('');
     try {
       await deleteAdminDefaultFood(food.id);
@@ -1883,8 +1996,18 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
 
   async function removeUserFood(food: AdminUserFoodListItem) {
     if (!isAdmin && food.user_id !== currentUser.id) return;
-    if (!window.confirm(`确定删除用户「${food.username}」的食物「${food.name}」吗？这会删除该用户自己的这条食物。`)) return;
+    setConfirmDialog({
+      title: '删除用户食物',
+      message: `确定删除用户「${food.username}」的食物「${food.name}」吗？这会删除该用户自己的这条食物。`,
+      confirmLabel: '删除',
+      tone: 'danger',
+      onConfirm: () => {
+        void deleteUserFoodItem(food);
+      },
+    });
+  }
 
+  async function deleteUserFoodItem(food: AdminUserFoodListItem) {
     setFoodError('');
     try {
       await deleteAdminUserFood(food.id);
@@ -2708,6 +2831,18 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
           </div>
         </form>
       </div>
+    )}
+
+    {confirmDialog && (
+      <ConfirmDialog
+        dialog={confirmDialog}
+        onCancel={() => setConfirmDialog(null)}
+        onConfirm={() => {
+          const action = confirmDialog.onConfirm;
+          setConfirmDialog(null);
+          action();
+        }}
+      />
     )}
     </>
   );

@@ -1081,6 +1081,88 @@ h1 {
   font-size: 20px;
 }
 
+.confirm-backdrop {
+  background:
+    radial-gradient(circle at 36% 24%, rgba(94, 234, 212, 0.18), transparent 32%),
+    radial-gradient(circle at 66% 74%, rgba(167, 139, 250, 0.16), transparent 36%),
+    rgba(4, 10, 9, 0.68);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.confirm-modal {
+  width: min(100%, 430px);
+  position: relative;
+  overflow: hidden;
+  gap: 16px;
+  padding: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.08)),
+    rgba(8, 20, 18, 0.74);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.38);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+
+.confirm-modal::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(120deg, rgba(94, 234, 212, 0.2), transparent 34%),
+    linear-gradient(300deg, rgba(167, 139, 250, 0.16), transparent 38%);
+}
+
+.confirm-modal > * {
+  position: relative;
+  z-index: 1;
+}
+
+.confirm-modal h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.confirm-modal p:not(.eyebrow) {
+  margin: 8px 0 0;
+  color: rgba(248, 250, 252, 0.72);
+  line-height: 1.65;
+}
+
+.confirm-icon {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.confirm-icon.danger {
+  color: #fb7185;
+  background: rgba(251, 113, 133, 0.14);
+}
+
+.confirm-icon.warning {
+  color: #facc15;
+  background: rgba(250, 204, 21, 0.13);
+}
+
+.confirm-action.danger {
+  border-color: rgba(251, 113, 133, 0.34);
+  background: linear-gradient(135deg, rgba(244, 63, 94, 0.95), rgba(190, 18, 60, 0.9));
+  color: #fff;
+}
+
+.confirm-action.warning {
+  border-color: rgba(250, 204, 21, 0.34);
+  background: linear-gradient(135deg, rgba(250, 204, 21, 0.95), rgba(245, 158, 11, 0.9));
+  color: #1c1917;
+}
+
 .field {
   display: grid;
   gap: 8px;
