@@ -160,6 +160,17 @@ class AdminUserListItem(BaseModel):
     is_active: bool
 
 
+class AdminUserCreate(BaseModel):
+    username: str = Field(min_length=3, max_length=40)
+    role: Literal["admin", "user"]
+    password: str = Field(min_length=6, max_length=128)
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, value: str) -> str:
+        return UserRegister.validate_username(value)
+
+
 class AdminUserStatusUpdate(BaseModel):
     is_active: bool
 

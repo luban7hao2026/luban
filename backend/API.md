@@ -474,6 +474,32 @@ Token 失效:
 
 响应: `AdminUserListItem[]`
 
+### POST /admin/users
+
+管理员新增真实用户。新增成功后会从 `user_id = 1` 的默认模板食物复制一份给新用户，`admin` 和 `user` 角色都执行同样复制逻辑。
+
+权限: 启用管理员。
+
+请求:
+
+```json
+{
+  "username": "newuser",
+  "role": "user",
+  "password": "123456"
+}
+```
+
+响应: `UserOut`
+
+规则:
+
+- `role` 只能是 `admin` 或 `user`。
+- `is_active` 默认是 `true`。
+- `last_login_at` 初始是 `null`。
+- 用户名不能重复。
+- 不签发 token，只创建账号。
+
 ### PATCH /admin/users/{user_id}/status
 
 启用或禁用用户。
@@ -655,7 +681,7 @@ Token 失效:
 ## 重要业务规则
 
 - `users.id = 1` 是 `default-template`，作为默认食物模板用户。
-- 新用户注册时会复制 `user_id = 1` 的默认食物。
+- 新用户注册或管理员新增用户时会复制 `user_id = 1` 的默认食物。
 - 用户之间的食物和抽取记录互相隔离。
 - `foods.is_active = false` 表示保留食物但不参与随机抽取。
 - 用户账号 `is_active = false` 表示禁止写操作/抽取操作，但允许登录和查看只读数据。

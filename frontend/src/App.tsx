@@ -28,6 +28,7 @@ import {
   changeCurrentPassword,
   clearAuthToken,
   createAdminDefaultFood,
+  createAdminUser,
   createFood,
   deleteAdminDefaultFood,
   deleteAdminUserFood,
@@ -1390,6 +1391,18 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
     new_password: '',
     confirm_password: '',
   });
+  const [userCreateOpen, setUserCreateOpen] = useState(false);
+  const [userCreateForm, setUserCreateForm] = useState<{
+    username: string;
+    role: 'admin' | 'user';
+    password: string;
+    confirm_password: string;
+  }>({
+    username: '',
+    role: 'user',
+    password: '',
+    confirm_password: '',
+  });
   const [roleEditingUser, setRoleEditingUser] = useState<AdminUserListItem | null>(null);
   const [roleValue, setRoleValue] = useState<'admin' | 'user'>('user');
   const [passwordResetUser, setPasswordResetUser] = useState<AdminUserListItem | null>(null);
@@ -1631,9 +1644,11 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
 
   function closeAccountDialogs() {
     setOwnPasswordOpen(false);
+    setUserCreateOpen(false);
     setRoleEditingUser(null);
     setPasswordResetUser(null);
     setOwnPasswordForm({ current_password: '', new_password: '', confirm_password: '' });
+    setUserCreateForm({ username: '', role: 'user', password: '', confirm_password: '' });
     setResetPasswordValue('');
     setResetPasswordConfirm('');
     setAccountError('');
@@ -1643,6 +1658,13 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
   function changeOwnPassword() {
     setAccountError('');
     setOwnPasswordOpen(true);
+  }
+
+  function startCreateUser() {
+    if (!isAdmin) return;
+    setAccountError('');
+    setUserCreateForm({ username: '', role: 'user', password: '', confirm_password: '' });
+    setUserCreateOpen(true);
   }
 
   function changeUserRole(user: AdminUserListItem) {
@@ -1683,6 +1705,42 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
       window.alert('密码已修改');
     } catch (err) {
       setAccountError(err instanceof Error ? err.message : '修改密码失败。');
+    } finally {
+      setAccountSubmitting(false);
+    }
+  }
+
+  async function submitCreateUser(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!isAdmin || accountSubmitting) return;
+
+    const username = userCreateForm.username.trim();
+    if (username.length < 3) {
+      setAccountError('用户名至少 3 位。');
+      return;
+    }
+    if (userCreateForm.password.length < 6) {
+      setAccountError('密码至少 6 位。');
+      return;
+    }
+    if (userCreateForm.password !== userCreateForm.confirm_password) {
+      setAccountError('两次输入的密码不一致。');
+      return;
+    }
+
+    setAccountSubmitting(true);
+    setAccountError('');
+    try {
+      await createAdminUser({
+        username,
+        role: userCreateForm.role,
+        password: userCreateForm.password,
+      });
+      await loadUsers();
+      setAdminPermissionsPage(1);
+      closeAccountDialogs();
+    } catch (err) {
+      setAccountError(err instanceof Error ? err.message : '新增用户失败。');
     } finally {
       setAccountSubmitting(false);
     }
@@ -1972,6 +2030,12 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
                 <span>管理用户角色、密码和账号删除</span>
               </div>
               <div className="admin-panel-actions">
+                {isAdmin && (
+                  <button className="primary-button" type="button" onClick={startCreateUser}>
+                    <Plus size={15} />
+                    新增用户
+                  </button>
+                )}
                 {renderAdminPagination(
                   '用户权限分页',
                   currentAdminPermissionsPage,
@@ -2485,6 +2549,71 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
             </button>
             <button type="submit" className="primary-button" disabled={accountSubmitting}>
               {accountSubmitting ? '保存中...' : '保存'}
+            </button>
+          </div>
+        </form>
+      </div>
+    )}
+
+    {userCreateOpen && (
+      <div className="modal-backdrop" onClick={closeAccountDialogs}>
+        <form className="modal panel-card admin-account-modal" onSubmit={submitCreateUser} onClick={(event) => event.stopPropagation()}>
+          <div className="modal-header">
+            <div>
+              <p className="eyebrow">Account</p>
+              <h2>新增用户</h2>
+            </div>
+            <button type="button" className="icon-button" onClick={closeAccountDialogs}>
+              <X size={16} />
+            </button>
+          </div>
+
+          <label className="field">
+            <span>用户名</span>
+            <input
+              value={userCreateForm.username}
+              onChange={(event) => setUserCreateForm({ ...userCreateForm, username: event.target.value })}
+              autoComplete="username"
+              autoFocus
+            />
+          </label>
+          <label className="field">
+            <span>角色类型</span>
+            <select
+              value={userCreateForm.role}
+              onChange={(event) => setUserCreateForm({ ...userCreateForm, role: event.target.value as 'admin' | 'user' })}
+            >
+              <option value="user">user</option>
+              <option value="admin">admin</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>密码</span>
+            <input
+              type="password"
+              value={userCreateForm.password}
+              onChange={(event) => setUserCreateForm({ ...userCreateForm, password: event.target.value })}
+              autoComplete="new-password"
+            />
+          </label>
+          <label className="field">
+            <span>确认密码</span>
+            <input
+              type="password"
+              value={userCreateForm.confirm_password}
+              onChange={(event) => setUserCreateForm({ ...userCreateForm, confirm_password: event.target.value })}
+              autoComplete="new-password"
+            />
+          </label>
+
+          {accountError && <div className="error-copy">{accountError}</div>}
+
+          <div className="modal-actions">
+            <button type="button" className="secondary-button" onClick={closeAccountDialogs}>
+              取消
+            </button>
+            <button type="submit" className="primary-button" disabled={accountSubmitting}>
+              {accountSubmitting ? '创建中...' : '创建'}
             </button>
           </div>
         </form>

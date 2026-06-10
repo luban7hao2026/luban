@@ -99,6 +99,13 @@ export async function getAdminDashboard() {
   return request<AdminDashboardStats>('/admin/dashboard');
 }
 
+export async function createAdminUser(payload: { username: string; role: 'admin' | 'user'; password: string }) {
+  return request<User>('/admin/users', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function updateAdminUserStatus(id: number, isActive: boolean) {
   return request<User>(`/admin/users/${id}/status`, {
     method: 'PATCH',

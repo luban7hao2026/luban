@@ -320,6 +320,7 @@ Admin/console routes in `backend/app/routes/admin.py`:
 
 - `GET /admin/dashboard`
 - `GET /admin/users`
+- `POST /admin/users`
 - `PATCH /admin/users/{user_id}/status`
 - `PATCH /admin/users/{user_id}/role`
 - `PATCH /admin/users/{user_id}/password`
@@ -364,6 +365,7 @@ Admin safety:
 
 - A user cannot disable or delete their own account.
 - A user cannot change their own role through the admin role endpoint.
+- Admin-created users can be assigned `admin` or `user`; both roles receive copied default-template foods.
 - The backend prevents demoting/disabling/deleting the last admin.
 - Admin password resets invalidate the target user's old tokens.
 - Enabling/disabling a user does not invalidate tokens; it only changes whether write/action endpoints allow operations.
@@ -391,7 +393,7 @@ Frontend auth behavior:
 - Admin console login currently uses `POST /auth/login` because `App` passes `consoleLogin` to `AuthScreen`, not `adminOnly`; both `admin` and `user` roles can enter the console, then UI and backend endpoints apply role/status permissions.
 - `POST /auth/admin/login` still exists as an admin-only login endpoint. `AuthScreen` can call it only through the `adminOnly` branch, which is not the current `/admin` path.
 - Registration uses `POST /auth/register`.
-- `/auth/me` is used to restore the current user from token.
+- `/auth/me` is used once on app startup to restore the current user from token; the frontend no longer polls it continuously.
 - `401` auth failures clear the token and return to login.
 - `403` permission/account-status failures keep the user on the page and display the backend error message.
 
@@ -400,7 +402,7 @@ Admin console UI areas:
 - Dashboard.
 - User list: status management only; the delete action is intentionally not shown here.
 - Food list with default-food and user-food scopes.
-- Permission/account management: role changes, password resets, and user deletion.
+- Permission/account management: user creation, role changes, password resets, and user deletion.
 
 Keep the current single-file app structure unless the user explicitly asks for a refactor.
 

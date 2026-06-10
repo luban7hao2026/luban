@@ -9,6 +9,7 @@ from app.models import Food, PickLog, User
 from app.schemas import (
     AdminCommonFoodItem,
     AdminDashboardStats,
+    AdminUserCreate,
     AdminUserFoodListItem,
     AdminUserListItem,
     AdminUserPasswordReset,
@@ -59,6 +60,22 @@ def _get_real_user(db: Session, user_id: int) -> User:
 def _ensure_not_last_admin_change(db: Session, user: User) -> None:
     if user.role == ADMIN_ROLE and _admin_count(db) <= 1:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one admin is required")
+
+
+def _seed_default_foods(db: Session, user: User) -> None:
+    template_foods = db.scalars(
+        select(Food).where(Food.user_id == DEFAULT_TEMPLATE_USER_ID).order_by(Food.id.asc())
+    ).all()
+    for food in template_foods:
+        db.add(
+            Food(
+                user_id=user.id,
+                name=food.name,
+                image_url=food.image_url,
+                category=food.category,
+                is_active=food.is_active,
+            )
+        )
 
 
 @router.get("/dashboard", response_model=AdminDashboardStats)
@@ -130,6 +147,31 @@ def list_users(
         )
         for user in users
     ]
+
+
+@router.post("/users", response_model=UserOut, status_code=status.HTTP_201_CREATED)
+def create_user(
+    payload: AdminUserCreate,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin),
+) -> User:
+    username = payload.username.strip()
+    existing = db.scalar(select(User).where(User.username == username))
+    if existing is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already exists")
+
+    user = User(
+        username=username,
+        password_hash=hash_password(payload.password),
+        role=payload.role,
+        is_active=True,
+    )
+    db.add(user)
+    db.flush()
+    _seed_default_foods(db, user)
+    db.commit()
+    db.refresh(user)
+    return user
 
 
 @router.patch("/users/{user_id}/status", response_model=UserOut)
