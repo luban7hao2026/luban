@@ -42,11 +42,32 @@ export type AuthResponse = {
   user: User;
 };
 
+export type UserRole = 'admin' | 'user';
+
 export type AdminUserListItem = {
   id: number;
   username: string;
+  role: UserRole;
+  last_login_at: string | null;
   created_at: string;
   food_count: number;
   pick_log_count: number;
   is_active: boolean;
+};
+
+export type AdminUserFoodListItem = Food & {
+  user_id: number;
+  username: string;
+};
+
+export type AdminCommonFoodItem = {
+  name: string;
+  image_url: string | null;
+  count: number;
+};
+
+export type AdminDashboardStats = {
+  user_count: number;
+  food_count: number;
+  common_foods: AdminCommonFoodItem[];
 };

@@ -1,5 +1,7 @@
 import type {
+  AdminDashboardStats,
   AdminUserListItem,
+  AdminUserFoodListItem,
   AuthResponse,
   Food,
   FoodImageCandidate,
@@ -75,14 +77,39 @@ export async function getCurrentUser() {
   return request<User>('/auth/me');
 }
 
+export async function changeCurrentPassword(payload: { current_password: string; new_password: string }) {
+  return request<User>('/auth/password', {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function getAdminUsers() {
   return request<AdminUserListItem[]>('/admin/users');
+}
+
+export async function getAdminDashboard() {
+  return request<AdminDashboardStats>('/admin/dashboard');
 }
 
 export async function updateAdminUserStatus(id: number, isActive: boolean) {
   return request<User>(`/admin/users/${id}/status`, {
     method: 'PATCH',
     body: JSON.stringify({ is_active: isActive }),
+  });
+}
+
+export async function updateAdminUserRole(id: number, role: 'admin' | 'user') {
+  return request<User>(`/admin/users/${id}/role`, {
+    method: 'PATCH',
+    body: JSON.stringify({ role }),
+  });
+}
+
+export async function resetAdminUserPassword(id: number, newPassword: string) {
+  return request<User>(`/admin/users/${id}/password`, {
+    method: 'PATCH',
+    body: JSON.stringify({ new_password: newPassword }),
   });
 }
 
@@ -119,6 +146,25 @@ export async function updateAdminDefaultFood(
 
 export async function deleteAdminDefaultFood(id: number) {
   return request<void>(`/admin/default-foods/${id}`, { method: 'DELETE' });
+}
+
+export async function getAdminUserFoods(query = '') {
+  const search = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : '';
+  return request<AdminUserFoodListItem[]>(`/admin/user-foods${search}`);
+}
+
+export async function updateAdminUserFood(
+  id: number,
+  payload: Partial<Pick<Food, 'name' | 'image_url' | 'category' | 'is_active'>>,
+) {
+  return request<AdminUserFoodListItem>(`/admin/user-foods/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteAdminUserFood(id: number) {
+  return request<void>(`/admin/user-foods/${id}`, { method: 'DELETE' });
 }
 
 export async function getFoods() {

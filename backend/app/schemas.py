@@ -1,5 +1,6 @@
 from datetime import datetime
 import re
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -126,6 +127,11 @@ class UserLogin(BaseModel):
         return value.strip()
 
 
+class UserPasswordChange(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=6, max_length=128)
+
+
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -146,6 +152,8 @@ class AuthToken(BaseModel):
 class AdminUserListItem(BaseModel):
     id: int
     username: str
+    role: str
+    last_login_at: datetime | None = None
     created_at: datetime
     food_count: int
     pick_log_count: int
@@ -154,3 +162,28 @@ class AdminUserListItem(BaseModel):
 
 class AdminUserStatusUpdate(BaseModel):
     is_active: bool
+
+
+class AdminUserRoleUpdate(BaseModel):
+    role: Literal["admin", "user"]
+
+
+class AdminUserPasswordReset(BaseModel):
+    new_password: str = Field(min_length=6, max_length=128)
+
+
+class AdminUserFoodListItem(FoodOut):
+    user_id: int
+    username: str
+
+
+class AdminCommonFoodItem(BaseModel):
+    name: str
+    image_url: str | None = None
+    count: int
+
+
+class AdminDashboardStats(BaseModel):
+    user_count: int
+    food_count: int
+    common_foods: list[AdminCommonFoodItem]

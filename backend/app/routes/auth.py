@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Food, User
-from app.schemas import AuthToken, UserLogin, UserOut, UserRegister
+from app.schemas import AuthToken, UserLogin, UserOut, UserPasswordChange, UserRegister
 from app.security import create_access_token, get_current_user, hash_password, verify_password
 
 
@@ -89,4 +89,19 @@ def admin_login(payload: UserLogin, db: Session = Depends(get_db)) -> AuthToken:
 
 @router.get("/me", response_model=UserOut)
 def read_current_user(current_user: User = Depends(get_current_user)) -> User:
+    return current_user
+
+
+@router.patch("/password", response_model=UserOut)
+def change_password(
+    payload: UserPasswordChange,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> User:
+    if not verify_password(payload.current_password, current_user.password_hash):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
+
+    current_user.password_hash = hash_password(payload.new_password)
+    db.commit()
+    db.refresh(current_user)
     return current_user

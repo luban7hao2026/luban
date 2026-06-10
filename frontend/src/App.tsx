@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   Check,
+  LayoutDashboard,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -8,12 +9,14 @@ import {
   Eye,
   EyeOff,
   ImageIcon,
+  KeyRound,
   Link,
   LogOut,
   Pencil,
   Plus,
   RefreshCcw,
   Search,
+  ShieldCheck,
   Sparkles,
   Trash2,
   UploadCloud,
@@ -22,16 +25,20 @@ import {
   X,
 } from 'lucide-react';
 import {
+  changeCurrentPassword,
   clearAuthToken,
   createAdminDefaultFood,
   createFood,
   deleteAdminDefaultFood,
+  deleteAdminUserFood,
   deleteAdminUser,
   deleteFood,
   deletePickLogs,
   downloadFoodImage,
   getAdminUsers,
   getAdminDefaultFoods,
+  getAdminDashboard,
+  getAdminUserFoods,
   getAuthToken,
   getCurrentUser,
   getFoods,
@@ -40,14 +47,25 @@ import {
   loginUser,
   pickRandomFood,
   registerUser,
+  resetAdminUserPassword,
   searchFoodImages,
   setAuthToken,
+  updateAdminUserRole,
   updateAdminUserStatus,
   updateAdminDefaultFood,
+  updateAdminUserFood,
   updateFood,
   uploadFoodImage,
 } from './api';
-import type { AdminUserListItem, Food, FoodImageCandidate, PickLog, User } from './types';
+import type {
+  AdminDashboardStats,
+  AdminUserFoodListItem,
+  AdminUserListItem,
+  Food,
+  FoodImageCandidate,
+  PickLog,
+  User,
+} from './types';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
 const DEFAULT_FOOD_IMAGE = '/default-food.svg';
@@ -1205,9 +1223,11 @@ function LunchApp({ currentUser, onLogout }: { currentUser: User; onLogout: () =
 
 function AuthScreen({
   adminOnly = false,
+  consoleLogin = false,
   onAuthenticated,
 }: {
   adminOnly?: boolean;
+  consoleLogin?: boolean;
   onAuthenticated: (user: User) => void;
 }) {
   const [mode, setMode] = useState<'login' | 'register'>('login');
@@ -1237,7 +1257,7 @@ function AuthScreen({
     setError('');
     setNotice('');
     try {
-      if (!adminOnly && mode === 'register') {
+      if (!adminOnly && !consoleLogin && mode === 'register') {
         await registerUser({ username: trimmedUsername, password });
         setMode('login');
         setPassword('');
@@ -1259,7 +1279,7 @@ function AuthScreen({
   }
 
   function switchMode(nextMode: 'login' | 'register') {
-    setMode(adminOnly ? 'login' : nextMode);
+    setMode(adminOnly || consoleLogin ? 'login' : nextMode);
     setError('');
     setNotice('');
     setPassword('');
@@ -1270,8 +1290,8 @@ function AuthScreen({
     <div className="auth-page">
       <form className="auth-panel" onSubmit={handleSubmit}>
         <div>
-          <p className="eyebrow">{adminOnly ? 'Admin Console' : 'Random Lunch'}</p>
-          <h1>{adminOnly ? 'Admin sign in' : mode === 'login' ? 'Sign in' : 'Create account'}</h1>
+          <p className="eyebrow">{adminOnly || consoleLogin ? 'Control Console' : 'Random Lunch'}</p>
+          <h1>{adminOnly || consoleLogin ? 'Console sign in' : mode === 'login' ? 'Sign in' : 'Create account'}</h1>
         </div>
 
         <label className="field">
@@ -1294,7 +1314,7 @@ function AuthScreen({
           />
         </label>
 
-        {!adminOnly && mode === 'register' && (
+        {!adminOnly && !consoleLogin && mode === 'register' && (
           <label className="field">
             <span>Confirm password</span>
             <input
@@ -1310,10 +1330,10 @@ function AuthScreen({
         {error && <div className="error-copy">{error}</div>}
 
         <button className="primary-button auth-submit" type="submit" disabled={submitting}>
-          {submitting ? 'Working...' : adminOnly ? 'Sign in as admin' : mode === 'login' ? 'Sign in' : 'Register'}
+          {submitting ? 'Working...' : adminOnly || consoleLogin ? 'Sign in' : mode === 'login' ? 'Sign in' : 'Register'}
         </button>
 
-        {!adminOnly && (
+        {!adminOnly && !consoleLogin && (
           <button
             className="auth-link"
             type="button"
@@ -1328,21 +1348,42 @@ function AuthScreen({
 }
 
 function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: () => void }) {
+  const isAdmin = currentUser.role === 'admin';
+  const [dashboard, setDashboard] = useState<AdminDashboardStats | null>(null);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [dashboardError, setDashboardError] = useState('');
   const [usersOpen, setUsersOpen] = useState(false);
   const [users, setUsers] = useState<AdminUserListItem[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersError, setUsersError] = useState('');
   const [actingUserId, setActingUserId] = useState<number | null>(null);
   const [foodsOpen, setFoodsOpen] = useState(false);
+  const [permissionsOpen, setPermissionsOpen] = useState(false);
+  const [foodScope, setFoodScope] = useState<'default' | 'user'>('default');
   const [foodView, setFoodView] = useState<'default' | 'create'>('default');
   const [adminFoods, setAdminFoods] = useState<Food[]>([]);
+  const [adminUserFoods, setAdminUserFoods] = useState<AdminUserFoodListItem[]>([]);
   const [foodSearch, setFoodSearch] = useState('');
+  const [userFoodSearch, setUserFoodSearch] = useState('');
   const [foodLoading, setFoodLoading] = useState(false);
   const [foodError, setFoodError] = useState('');
   const [foodSubmitting, setFoodSubmitting] = useState(false);
-  const [editingDefaultFood, setEditingDefaultFood] = useState<Food | null>(null);
+  const [editingDefaultFood, setEditingDefaultFood] = useState<Food | AdminUserFoodListItem | null>(null);
   const [foodForm, setFoodForm] = useState(emptyAdminFoodForm);
   const [foodImageFile, setFoodImageFile] = useState<File | null>(null);
+  const [accountError, setAccountError] = useState('');
+  const [accountSubmitting, setAccountSubmitting] = useState(false);
+  const [ownPasswordOpen, setOwnPasswordOpen] = useState(false);
+  const [ownPasswordForm, setOwnPasswordForm] = useState({
+    current_password: '',
+    new_password: '',
+    confirm_password: '',
+  });
+  const [roleEditingUser, setRoleEditingUser] = useState<AdminUserListItem | null>(null);
+  const [roleValue, setRoleValue] = useState<'admin' | 'user'>('user');
+  const [passwordResetUser, setPasswordResetUser] = useState<AdminUserListItem | null>(null);
+  const [resetPasswordValue, setResetPasswordValue] = useState('');
+  const [resetPasswordConfirm, setResetPasswordConfirm] = useState('');
   const adminFoodPreviewUrl = useMemo(() => {
     if (!foodImageFile) return '';
     return URL.createObjectURL(foodImageFile);
@@ -1354,6 +1395,22 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
       if (adminFoodPreviewUrl) URL.revokeObjectURL(adminFoodPreviewUrl);
     };
   }, [adminFoodPreviewUrl]);
+
+  useEffect(() => {
+    void loadDashboard();
+  }, []);
+
+  async function loadDashboard() {
+    setDashboardLoading(true);
+    setDashboardError('');
+    try {
+      setDashboard(await getAdminDashboard());
+    } catch (err) {
+      setDashboardError(err instanceof Error ? err.message : 'Failed to load dashboard.');
+    } finally {
+      setDashboardLoading(false);
+    }
+  }
 
   async function loadUsers() {
     setUsersLoading(true);
@@ -1372,9 +1429,19 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
     const nextOpen = !usersOpen;
     setUsersOpen(nextOpen);
     if (nextOpen) setFoodsOpen(false);
+    if (nextOpen) setPermissionsOpen(false);
     if (!nextOpen || users.length > 0 || usersLoading) return;
 
     await loadUsers();
+  }
+
+  async function openDashboard() {
+    setUsersOpen(false);
+    setFoodsOpen(false);
+    setPermissionsOpen(false);
+    if (!dashboard && !dashboardLoading) {
+      await loadDashboard();
+    }
   }
 
   async function loadDefaultFoods(query = foodSearch) {
@@ -1389,16 +1456,62 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
     }
   }
 
+  async function loadUserFoods(query = userFoodSearch) {
+    setFoodLoading(true);
+    setFoodError('');
+    try {
+      setAdminUserFoods(await getAdminUserFoods(query));
+    } catch (err) {
+      setFoodError(err instanceof Error ? err.message : 'Failed to load user foods.');
+    } finally {
+      setFoodLoading(false);
+    }
+  }
+
   async function toggleFoods() {
     const nextOpen = !foodsOpen;
     setFoodsOpen(nextOpen);
     if (nextOpen) setUsersOpen(false);
+    if (nextOpen) setPermissionsOpen(false);
     if (!nextOpen || adminFoods.length > 0 || foodLoading) return;
 
     await loadDefaultFoods();
   }
 
+  async function openPermissions() {
+    if (!isAdmin) return;
+    setPermissionsOpen(true);
+    setUsersOpen(false);
+    setFoodsOpen(false);
+    if (users.length === 0 && !usersLoading) {
+      await loadUsers();
+    }
+  }
+
+  async function openDefaultFoods() {
+    setFoodScope('default');
+    setFoodView('default');
+    setEditingDefaultFood(null);
+    setFoodForm(emptyAdminFoodForm);
+    setFoodImageFile(null);
+    if (adminFoods.length === 0 && !foodLoading) {
+      await loadDefaultFoods();
+    }
+  }
+
+  async function openUserFoods() {
+    setFoodScope('user');
+    setFoodView('default');
+    setEditingDefaultFood(null);
+    setFoodForm(emptyAdminFoodForm);
+    setFoodImageFile(null);
+    if (adminUserFoods.length === 0 && !foodLoading) {
+      await loadUserFoods();
+    }
+  }
+
   async function toggleUserStatus(user: AdminUserListItem) {
+    if (!isAdmin) return;
     const action = user.is_active ? '禁用' : '启用';
     if (!window.confirm(`确定${action}用户「${user.username}」吗？`)) return;
 
@@ -1415,6 +1528,7 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
   }
 
   async function removeUser(user: AdminUserListItem) {
+    if (!isAdmin) return;
     if (!window.confirm(`确定删除用户「${user.username}」吗？这会同时删除该用户的食物和抽取记录。`)) return;
 
     setActingUserId(user.id);
@@ -1429,7 +1543,113 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
     }
   }
 
+  function closeAccountDialogs() {
+    setOwnPasswordOpen(false);
+    setRoleEditingUser(null);
+    setPasswordResetUser(null);
+    setOwnPasswordForm({ current_password: '', new_password: '', confirm_password: '' });
+    setResetPasswordValue('');
+    setResetPasswordConfirm('');
+    setAccountError('');
+    setAccountSubmitting(false);
+  }
+
+  function changeOwnPassword() {
+    setAccountError('');
+    setOwnPasswordOpen(true);
+  }
+
+  function changeUserRole(user: AdminUserListItem) {
+    if (!isAdmin) return;
+    setAccountError('');
+    setRoleEditingUser(user);
+    setRoleValue(user.role);
+  }
+
+  function resetUserPassword(user: AdminUserListItem) {
+    if (!isAdmin) return;
+    setAccountError('');
+    setResetPasswordValue('');
+    setResetPasswordConfirm('');
+    setPasswordResetUser(user);
+  }
+
+  async function submitOwnPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (accountSubmitting) return;
+    if (ownPasswordForm.new_password.length < 6) {
+      setAccountError('新密码至少 6 位。');
+      return;
+    }
+    if (ownPasswordForm.new_password !== ownPasswordForm.confirm_password) {
+      setAccountError('两次输入的新密码不一致。');
+      return;
+    }
+
+    setAccountSubmitting(true);
+    setAccountError('');
+    try {
+      await changeCurrentPassword({
+        current_password: ownPasswordForm.current_password,
+        new_password: ownPasswordForm.new_password,
+      });
+      closeAccountDialogs();
+      window.alert('密码已修改');
+    } catch (err) {
+      setAccountError(err instanceof Error ? err.message : '修改密码失败。');
+    } finally {
+      setAccountSubmitting(false);
+    }
+  }
+
+  async function submitRoleChange(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!roleEditingUser || accountSubmitting) return;
+
+    setAccountSubmitting(true);
+    setAccountError('');
+    setActingUserId(roleEditingUser.id);
+    try {
+      await updateAdminUserRole(roleEditingUser.id, roleValue);
+      await loadUsers();
+      closeAccountDialogs();
+    } catch (err) {
+      setAccountError(err instanceof Error ? err.message : '修改角色失败。');
+    } finally {
+      setActingUserId(null);
+      setAccountSubmitting(false);
+    }
+  }
+
+  async function submitPasswordReset(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!passwordResetUser || accountSubmitting) return;
+    if (resetPasswordValue.length < 6) {
+      setAccountError('新密码至少 6 位。');
+      return;
+    }
+    if (resetPasswordValue !== resetPasswordConfirm) {
+      setAccountError('两次输入的新密码不一致。');
+      return;
+    }
+
+    setAccountSubmitting(true);
+    setAccountError('');
+    setActingUserId(passwordResetUser.id);
+    try {
+      await resetAdminUserPassword(passwordResetUser.id, resetPasswordValue);
+      closeAccountDialogs();
+      window.alert('密码已修改');
+    } catch (err) {
+      setAccountError(err instanceof Error ? err.message : '重置密码失败。');
+    } finally {
+      setActingUserId(null);
+      setAccountSubmitting(false);
+    }
+  }
+
   function startCreateFood() {
+    if (!isAdmin) return;
     setEditingDefaultFood(null);
     setFoodForm(emptyAdminFoodForm);
     setFoodImageFile(null);
@@ -1438,6 +1658,8 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
   }
 
   function startEditFood(food: Food) {
+    if (foodScope === 'default' && !isAdmin) return;
+    if (foodScope === 'user' && !isAdmin && 'user_id' in food && food.user_id !== currentUser.id) return;
     setEditingDefaultFood(food);
     setFoodForm({
       name: food.name,
@@ -1452,6 +1674,7 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
 
   async function submitDefaultFood(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (foodScope === 'default' && !isAdmin) return;
     const name = foodForm.name.trim();
     if (!name) {
       setFoodError('食物名称不能为空。');
@@ -1475,7 +1698,12 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
       };
 
       if (editingDefaultFood) {
-        await updateAdminDefaultFood(editingDefaultFood.id, payload);
+        if (foodScope === 'user') {
+          if (!isAdmin && 'user_id' in editingDefaultFood && editingDefaultFood.user_id !== currentUser.id) return;
+          await updateAdminUserFood(editingDefaultFood.id, payload);
+        } else {
+          await updateAdminDefaultFood(editingDefaultFood.id, payload);
+        }
       } else {
         await createAdminDefaultFood(payload);
       }
@@ -1484,7 +1712,11 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
       setFoodImageFile(null);
       setEditingDefaultFood(null);
       setFoodView('default');
-      await loadDefaultFoods();
+      if (foodScope === 'user') {
+        await loadUserFoods();
+      } else {
+        await loadDefaultFoods();
+      }
     } catch (err) {
       setFoodError(err instanceof Error ? err.message : 'Failed to save food.');
     } finally {
@@ -1493,6 +1725,7 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
   }
 
   async function removeDefaultFood(food: Food) {
+    if (!isAdmin) return;
     if (!window.confirm(`确定删除默认食物「${food.name}」吗？这只会删除默认模板，不会删除已有用户的复制数据。`)) return;
 
     setFoodError('');
@@ -1504,13 +1737,32 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
     }
   }
 
+  async function removeUserFood(food: AdminUserFoodListItem) {
+    if (!isAdmin && food.user_id !== currentUser.id) return;
+    if (!window.confirm(`确定删除用户「${food.username}」的食物「${food.name}」吗？这会删除该用户自己的这条食物。`)) return;
+
+    setFoodError('');
+    try {
+      await deleteAdminUserFood(food.id);
+      await loadUserFoods();
+    } catch (err) {
+      setFoodError(err instanceof Error ? err.message : 'Failed to delete user food.');
+    }
+  }
+
   return (
+    <>
     <div className="admin-page">
       <aside className="admin-sidebar">
         <div className="admin-brand">
           <p className="eyebrow">Admin Console</p>
           <strong>后台管理</strong>
         </div>
+
+        <button className={`admin-nav-button ${!usersOpen && !foodsOpen && !permissionsOpen ? 'active' : ''}`} type="button" onClick={() => void openDashboard()}>
+          <LayoutDashboard size={18} />
+          仪表盘
+        </button>
 
         <button className={`admin-nav-button ${usersOpen ? 'active' : ''}`} type="button" onClick={toggleUsers}>
           <Users size={18} />
@@ -1522,11 +1774,42 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
           食物列表
         </button>
 
+        {foodsOpen && (
+          <div className="admin-subnav">
+            <button
+              type="button"
+              className={foodScope === 'default' ? 'active' : ''}
+              onClick={() => void openDefaultFoods()}
+            >
+              默认食物
+            </button>
+            <button
+              type="button"
+              className={foodScope === 'user' ? 'active' : ''}
+              onClick={() => void openUserFoods()}
+            >
+              用户食物
+            </button>
+          </div>
+        )}
+
+        {isAdmin && (
+          <button className={`admin-nav-button ${permissionsOpen ? 'active' : ''}`} type="button" onClick={() => void openPermissions()}>
+            <ShieldCheck size={18} />
+            用户权限
+          </button>
+        )}
+
         <div className="admin-sidebar-footer">
           <div className="admin-identity">
             <span>当前管理员</span>
             <strong>{currentUser.username}</strong>
+            <span>{currentUser.role}</span>
           </div>
+          <button className="admin-logout" type="button" onClick={() => void changeOwnPassword()}>
+            <KeyRound size={16} />
+            Password
+          </button>
           <button className="admin-logout" type="button" onClick={onLogout}>
             <LogOut size={16} />
             Logout
@@ -1538,16 +1821,99 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
         <header className="admin-topbar">
           <div>
             <p className="eyebrow">Overview</p>
-            <h1>{usersOpen ? '用户列表' : foodsOpen ? '食物列表' : '后台首页'}</h1>
+            <h1>{permissionsOpen ? '用户权限' : usersOpen ? '用户列表' : foodsOpen ? '食物列表' : '仪表盘'}</h1>
           </div>
         </header>
 
-        {usersOpen ? (
+        {permissionsOpen ? (
           <section className="admin-table-panel">
             <div className="admin-panel-header">
               <div>
-                <h2>普通用户</h2>
-                <span>管理员账号不会显示在这里</span>
+                <h2>用户权限</h2>
+                <span>管理用户角色、密码和账号删除</span>
+              </div>
+              <button className="secondary-button" type="button" onClick={() => void loadUsers()}>
+                <RefreshCcw size={15} />
+                刷新
+              </button>
+            </div>
+
+            {usersError && <div className="error-copy">{usersError}</div>}
+
+            <div className="admin-table-wrap">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>用户 ID</th>
+                    <th>用户名</th>
+                    <th>注册时间</th>
+                    <th>最后登录时间</th>
+                    <th>角色类型</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {usersLoading ? (
+                    <tr>
+                      <td colSpan={6}>加载中...</td>
+                    </tr>
+                  ) : users.length === 0 ? (
+                    <tr>
+                      <td colSpan={6}>暂无用户</td>
+                    </tr>
+                  ) : (
+                    users.map((user) => (
+                      <tr key={user.id}>
+                        <td>{user.id}</td>
+                        <td>{user.username}</td>
+                        <td>{formatTime(user.created_at)}</td>
+                        <td>{user.last_login_at ? formatTime(user.last_login_at) : '-'}</td>
+                        <td>
+                          <span className={user.role === 'admin' ? 'admin-status active' : 'admin-status'}>
+                            {user.role}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="admin-row-actions stacked">
+                            <button
+                              type="button"
+                              className="admin-small-button"
+                              disabled={actingUserId === user.id}
+                              onClick={() => changeUserRole(user)}
+                            >
+                              修改角色
+                            </button>
+                            <button
+                              type="button"
+                              className="admin-small-button"
+                              disabled={actingUserId === user.id}
+                              onClick={() => resetUserPassword(user)}
+                            >
+                              重置密码
+                            </button>
+                            <button
+                              type="button"
+                              className="admin-small-button danger"
+                              disabled={actingUserId === user.id}
+                              onClick={() => removeUser(user)}
+                            >
+                              删除
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ) : usersOpen ? (
+          <section className="admin-table-panel">
+            <div className="admin-panel-header">
+              <div>
+                <h2>用户列表</h2>
+                <span>{isAdmin ? '管理员可以管理用户状态' : '当前角色仅可查看用户列表'}</span>
               </div>
               <button
                 className="secondary-button"
@@ -1578,6 +1944,7 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
                     <th>用户 ID</th>
                     <th>用户名</th>
                     <th>注册时间</th>
+                    <th>角色</th>
                     <th>食物数量</th>
                     <th>抽取记录数量</th>
                     <th>启用状态</th>
@@ -1587,11 +1954,11 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
                 <tbody>
                   {usersLoading ? (
                     <tr>
-                      <td colSpan={7}>加载中...</td>
+                      <td colSpan={8}>加载中...</td>
                     </tr>
                   ) : users.length === 0 ? (
                     <tr>
-                      <td colSpan={7}>暂无普通用户</td>
+                      <td colSpan={8}>暂无用户</td>
                     </tr>
                   ) : (
                     users.map((user) => (
@@ -1599,6 +1966,7 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
                         <td>{user.id}</td>
                         <td>{user.username}</td>
                         <td>{formatTime(user.created_at)}</td>
+                        <td>{user.role}</td>
                         <td>{user.food_count}</td>
                         <td>{user.pick_log_count}</td>
                         <td>
@@ -1607,24 +1975,28 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
                           </span>
                         </td>
                         <td>
-                          <div className="admin-row-actions">
-                            <button
-                              type="button"
-                              className={user.is_active ? 'admin-small-button warning' : 'admin-small-button'}
-                              disabled={actingUserId === user.id}
-                              onClick={() => toggleUserStatus(user)}
-                            >
-                              {user.is_active ? '禁用' : '启用'}
-                            </button>
-                            <button
-                              type="button"
-                              className="admin-small-button danger"
-                              disabled={actingUserId === user.id}
-                              onClick={() => removeUser(user)}
-                            >
-                              删除
-                            </button>
-                          </div>
+                          {isAdmin ? (
+                            <div className="admin-row-actions">
+                              <button
+                                type="button"
+                                className={user.is_active ? 'admin-small-button warning' : 'admin-small-button'}
+                                disabled={actingUserId === user.id}
+                                onClick={() => toggleUserStatus(user)}
+                              >
+                                {user.is_active ? '禁用' : '启用'}
+                              </button>
+                              <button
+                                type="button"
+                                className="admin-small-button danger"
+                                disabled={actingUserId === user.id}
+                                onClick={() => removeUser(user)}
+                              >
+                                删除
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="admin-readonly">只读</span>
+                          )}
                         </td>
                       </tr>
                     ))
@@ -1637,26 +2009,34 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
           <section className="admin-table-panel">
             <div className="admin-panel-header">
               <div>
-                <h2>默认食物</h2>
-                <span>这里管理新用户注册时复制的默认模板食物</span>
+                <h2>{foodScope === 'default' ? '默认食物' : '用户食物'}</h2>
+                <span>
+                  {foodScope === 'default'
+                    ? '这里管理新用户注册时复制的默认模板食物'
+                    : '这里管理普通用户各自拥有的食物'}
+                </span>
               </div>
-              <div className="admin-sub-tabs">
-                <button
-                  type="button"
-                  className={foodView === 'default' ? 'active' : ''}
-                  onClick={() => {
-                    setFoodView('default');
-                    setEditingDefaultFood(null);
-                    setFoodForm(emptyAdminFoodForm);
-                    setFoodImageFile(null);
-                  }}
-                >
-                  默认食物
-                </button>
-                <button type="button" className={foodView === 'create' ? 'active' : ''} onClick={startCreateFood}>
-                  新增食物
-                </button>
-              </div>
+              {foodScope === 'default' && (
+                <div className="admin-sub-tabs">
+                  <button
+                    type="button"
+                    className={foodView === 'default' ? 'active' : ''}
+                    onClick={() => {
+                      setFoodView('default');
+                      setEditingDefaultFood(null);
+                      setFoodForm(emptyAdminFoodForm);
+                      setFoodImageFile(null);
+                    }}
+                  >
+                    默认食物
+                  </button>
+                  {isAdmin && (
+                    <button type="button" className={foodView === 'create' ? 'active' : ''} onClick={startCreateFood}>
+                      新增食物
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             {foodError && <div className="error-copy">{foodError}</div>}
@@ -1667,17 +2047,31 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
                   <label className="admin-searchbox">
                     <Search size={16} />
                     <input
-                      value={foodSearch}
-                      onChange={(event) => setFoodSearch(event.target.value)}
+                      value={foodScope === 'default' ? foodSearch : userFoodSearch}
+                      onChange={(event) => {
+                        if (foodScope === 'default') {
+                          setFoodSearch(event.target.value);
+                        } else {
+                          setUserFoodSearch(event.target.value);
+                        }
+                      }}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter') {
-                          void loadDefaultFoods(foodSearch);
+                          if (foodScope === 'default') {
+                            void loadDefaultFoods(foodSearch);
+                          } else {
+                            void loadUserFoods(userFoodSearch);
+                          }
                         }
                       }}
                       placeholder="按食物名称搜索"
                     />
                   </label>
-                  <button className="secondary-button" type="button" onClick={() => loadDefaultFoods(foodSearch)}>
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={() => (foodScope === 'default' ? loadDefaultFoods(foodSearch) : loadUserFoods(userFoodSearch))}
+                  >
                     <Search size={15} />
                     搜索
                   </button>
@@ -1686,7 +2080,12 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
                     type="button"
                     onClick={() => {
                       setFoodSearch('');
-                      void loadDefaultFoods('');
+                      setUserFoodSearch('');
+                      if (foodScope === 'default') {
+                        void loadDefaultFoods('');
+                      } else {
+                        void loadUserFoods('');
+                      }
                     }}
                   >
                     <RefreshCcw size={15} />
@@ -1699,6 +2098,7 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
                     <thead>
                       <tr>
                         <th>图片</th>
+                        {foodScope === 'user' && <th>用户</th>}
                         <th>食物名称</th>
                         <th>分类</th>
                         <th>创建时间</th>
@@ -1708,39 +2108,64 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
                     <tbody>
                       {foodLoading ? (
                         <tr>
-                          <td colSpan={5}>加载中...</td>
+                          <td colSpan={foodScope === 'user' ? 6 : 5}>加载中...</td>
                         </tr>
-                      ) : adminFoods.length === 0 ? (
+                      ) : (foodScope === 'default' ? adminFoods.length === 0 : adminUserFoods.length === 0) ? (
                         <tr>
-                          <td colSpan={5}>暂无默认食物</td>
+                          <td colSpan={foodScope === 'user' ? 6 : 5}>
+                            {foodScope === 'default' ? '暂无默认食物' : '暂无用户食物'}
+                          </td>
                         </tr>
                       ) : (
-                        adminFoods.map((food) => (
+                        (foodScope === 'default' ? adminFoods : adminUserFoods).map((food) => {
+                          const canManageFood =
+                            foodScope === 'default'
+                              ? isAdmin
+                              : isAdmin || (food as AdminUserFoodListItem).user_id === currentUser.id;
+
+                          return (
                           <tr key={food.id}>
                             <td>
                               <div className="admin-food-thumb">
                                 <FoodImage src={getImageSrc(food.image_url)} alt={food.name} />
                               </div>
                             </td>
+                            {foodScope === 'user' && (
+                              <td>
+                                <div className="admin-user-cell">
+                                  <strong>{(food as AdminUserFoodListItem).username}</strong>
+                                  <span>ID {(food as AdminUserFoodListItem).user_id}</span>
+                                </div>
+                              </td>
+                            )}
                             <td>{food.name}</td>
                             <td>{food.category || '未分类'}</td>
                             <td>{formatTime(food.created_at)}</td>
                             <td>
-                              <div className="admin-row-actions">
-                                <button type="button" className="admin-small-button" onClick={() => startEditFood(food)}>
-                                  更新
-                                </button>
-                                <button
-                                  type="button"
-                                  className="admin-small-button danger"
-                                  onClick={() => removeDefaultFood(food)}
-                                >
-                                  删除
-                                </button>
-                              </div>
+                              {canManageFood ? (
+                                <div className="admin-row-actions">
+                                  <button type="button" className="admin-small-button" onClick={() => startEditFood(food)}>
+                                    更新
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="admin-small-button danger"
+                                    onClick={() =>
+                                      foodScope === 'user'
+                                        ? removeUserFood(food as AdminUserFoodListItem)
+                                        : removeDefaultFood(food)
+                                    }
+                                  >
+                                    删除
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="admin-readonly">只读</span>
+                              )}
                             </td>
                           </tr>
-                        ))
+                          );
+                        })
                       )}
                     </tbody>
                   </table>
@@ -1824,19 +2249,201 @@ function AdminShell({ currentUser, onLogout }: { currentUser: User; onLogout: ()
             )}
           </section>
         ) : (
-          <section className="admin-empty-panel">
-            <h2>选择左侧菜单</h2>
-            <p>点击左侧菜单查看用户或默认食物，再次点击可收起。</p>
+          <section className="admin-dashboard-grid">
+            {dashboardError && <div className="error-copy admin-dashboard-error">{dashboardError}</div>}
+            <article className="admin-stat-card">
+              <span>用户数量</span>
+              <strong>{dashboardLoading ? '...' : dashboard?.user_count ?? 0}</strong>
+            </article>
+            <article className="admin-stat-card">
+              <span>食物数量</span>
+              <strong>{dashboardLoading ? '...' : dashboard?.food_count ?? 0}</strong>
+            </article>
+            <article className="admin-stat-card admin-common-card">
+              <div className="admin-card-heading">
+                <span>常见食物</span>
+                <button className="admin-small-button" type="button" onClick={() => void loadDashboard()}>
+                  刷新
+                </button>
+              </div>
+              <div className="admin-common-foods">
+                {dashboardLoading ? (
+                  <p>加载中...</p>
+                ) : dashboard?.common_foods.length ? (
+                  dashboard.common_foods.map((food) => (
+                    <div className="admin-common-food" key={food.name}>
+                      <div className="admin-common-food-image">
+                        <FoodImage src={getImageSrc(food.image_url)} alt={food.name} />
+                      </div>
+                      <div>
+                        <strong>{food.name}</strong>
+                        <span>{food.count} 次</span>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p>暂无常见食物</p>
+                )}
+              </div>
+            </article>
           </section>
         )}
       </main>
     </div>
+
+    {ownPasswordOpen && (
+      <div className="modal-backdrop" onClick={closeAccountDialogs}>
+        <form className="modal panel-card admin-account-modal" onSubmit={submitOwnPassword} onClick={(event) => event.stopPropagation()}>
+          <div className="modal-header">
+            <div>
+              <p className="eyebrow">Password</p>
+              <h2>修改密码</h2>
+            </div>
+            <button type="button" className="icon-button" onClick={closeAccountDialogs}>
+              <X size={16} />
+            </button>
+          </div>
+
+          <label className="field">
+            <span>当前密码</span>
+            <input
+              type="password"
+              value={ownPasswordForm.current_password}
+              onChange={(event) => setOwnPasswordForm({ ...ownPasswordForm, current_password: event.target.value })}
+              autoComplete="current-password"
+              autoFocus
+            />
+          </label>
+          <label className="field">
+            <span>新密码</span>
+            <input
+              type="password"
+              value={ownPasswordForm.new_password}
+              onChange={(event) => setOwnPasswordForm({ ...ownPasswordForm, new_password: event.target.value })}
+              autoComplete="new-password"
+            />
+          </label>
+          <label className="field">
+            <span>确认密码</span>
+            <input
+              type="password"
+              value={ownPasswordForm.confirm_password}
+              onChange={(event) => setOwnPasswordForm({ ...ownPasswordForm, confirm_password: event.target.value })}
+              autoComplete="new-password"
+            />
+          </label>
+
+          {accountError && <div className="error-copy">{accountError}</div>}
+
+          <div className="modal-actions">
+            <button type="button" className="secondary-button" onClick={closeAccountDialogs}>
+              取消
+            </button>
+            <button type="submit" className="primary-button" disabled={accountSubmitting}>
+              {accountSubmitting ? '保存中...' : '保存'}
+            </button>
+          </div>
+        </form>
+      </div>
+    )}
+
+    {roleEditingUser && (
+      <div className="modal-backdrop" onClick={closeAccountDialogs}>
+        <form className="modal panel-card admin-account-modal" onSubmit={submitRoleChange} onClick={(event) => event.stopPropagation()}>
+          <div className="modal-header">
+            <div>
+              <p className="eyebrow">Role</p>
+              <h2>修改角色</h2>
+            </div>
+            <button type="button" className="icon-button" onClick={closeAccountDialogs}>
+              <X size={16} />
+            </button>
+          </div>
+
+          <div className="admin-account-target">
+            <span>用户</span>
+            <strong>{roleEditingUser.username}</strong>
+          </div>
+          <label className="field">
+            <span>角色类型</span>
+            <select value={roleValue} onChange={(event) => setRoleValue(event.target.value as 'admin' | 'user')}>
+              <option value="user">user</option>
+              <option value="admin">admin</option>
+            </select>
+          </label>
+
+          {accountError && <div className="error-copy">{accountError}</div>}
+
+          <div className="modal-actions">
+            <button type="button" className="secondary-button" onClick={closeAccountDialogs}>
+              取消
+            </button>
+            <button type="submit" className="primary-button" disabled={accountSubmitting}>
+              {accountSubmitting ? '保存中...' : '保存'}
+            </button>
+          </div>
+        </form>
+      </div>
+    )}
+
+    {passwordResetUser && (
+      <div className="modal-backdrop" onClick={closeAccountDialogs}>
+        <form className="modal panel-card admin-account-modal" onSubmit={submitPasswordReset} onClick={(event) => event.stopPropagation()}>
+          <div className="modal-header">
+            <div>
+              <p className="eyebrow">Password</p>
+              <h2>重置密码</h2>
+            </div>
+            <button type="button" className="icon-button" onClick={closeAccountDialogs}>
+              <X size={16} />
+            </button>
+          </div>
+
+          <div className="admin-account-target">
+            <span>用户</span>
+            <strong>{passwordResetUser.username}</strong>
+          </div>
+          <label className="field">
+            <span>新密码</span>
+            <input
+              type="password"
+              value={resetPasswordValue}
+              onChange={(event) => setResetPasswordValue(event.target.value)}
+              autoComplete="new-password"
+              autoFocus
+            />
+          </label>
+          <label className="field">
+            <span>确认密码</span>
+            <input
+              type="password"
+              value={resetPasswordConfirm}
+              onChange={(event) => setResetPasswordConfirm(event.target.value)}
+              autoComplete="new-password"
+            />
+          </label>
+
+          {accountError && <div className="error-copy">{accountError}</div>}
+
+          <div className="modal-actions">
+            <button type="button" className="secondary-button" onClick={closeAccountDialogs}>
+              取消
+            </button>
+            <button type="submit" className="primary-button" disabled={accountSubmitting}>
+              {accountSubmitting ? '保存中...' : '保存'}
+            </button>
+          </div>
+        </form>
+      </div>
+    )}
+    </>
   );
 }
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
+  const authExpiryPromptShownRef = useRef(false);
   const isAdminPath = window.location.pathname.startsWith('/admin');
 
   useEffect(() => {
@@ -1849,7 +2456,10 @@ export default function App() {
     let cancelled = false;
     getCurrentUser()
       .then((user) => {
-        if (!cancelled) setCurrentUser(user);
+        if (!cancelled) {
+          authExpiryPromptShownRef.current = false;
+          setCurrentUser(user);
+        }
       })
       .catch(() => {
         clearAuthToken();
@@ -1873,19 +2483,24 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!currentUser || isAdminPath) return;
+    if (!currentUser) return;
 
     const timer = window.setInterval(() => {
       getCurrentUser().catch(() => {
+        if (!authExpiryPromptShownRef.current) {
+          authExpiryPromptShownRef.current = true;
+          window.alert('请重新登录');
+        }
         clearAuthToken();
         setCurrentUser(null);
       });
-    }, 10000);
+    }, 5000);
 
     return () => window.clearInterval(timer);
-  }, [currentUser, isAdminPath]);
+  }, [currentUser]);
 
   function handleLogout() {
+    authExpiryPromptShownRef.current = false;
     clearAuthToken();
     setCurrentUser(null);
   }
@@ -1902,14 +2517,10 @@ export default function App() {
   }
 
   if (!currentUser) {
-    return <AuthScreen adminOnly={isAdminPath} onAuthenticated={setCurrentUser} />;
+    return <AuthScreen consoleLogin={isAdminPath} onAuthenticated={setCurrentUser} />;
   }
 
   if (isAdminPath) {
-    if (currentUser.role !== 'admin') {
-      return <AuthScreen adminOnly onAuthenticated={setCurrentUser} />;
-    }
-
     return <AdminShell currentUser={currentUser} onLogout={handleLogout} />;
   }
 

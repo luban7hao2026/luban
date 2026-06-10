@@ -52,12 +52,19 @@ def verify_password(password: str, password_hash: str) -> bool:
     return hmac.compare_digest(actual, expected)
 
 
+def _password_fingerprint(password_hash: str) -> str:
+    settings = get_settings()
+    digest = hmac.new(settings.auth_secret.encode("utf-8"), password_hash.encode("utf-8"), hashlib.sha256).digest()
+    return _b64encode(digest)
+
+
 def create_access_token(user: User) -> str:
     settings = get_settings()
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_minutes)
     payload = {
         "sub": user.id,
         "username": user.username,
+        "pwd": _password_fingerprint(user.password_hash),
         "exp": int(expires_at.timestamp()),
     }
     body = _b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
@@ -109,6 +116,9 @@ def get_current_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is disabled")
+    token_password_fingerprint = payload.get("pwd")
+    if token_password_fingerprint is not None and token_password_fingerprint != _password_fingerprint(user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Password changed")
 
     return user
 
