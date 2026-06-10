@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -13,6 +13,10 @@ from app.security import create_access_token, get_current_user, hash_password, v
 router = APIRouter(prefix="/auth", tags=["auth"])
 DEFAULT_TEMPLATE_USER_ID = 1
 ADMIN_ROLE = "admin"
+
+
+def _utc_now_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _seed_default_foods(db: Session, user: User) -> None:
@@ -102,6 +106,7 @@ def change_password(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
 
     current_user.password_hash = hash_password(payload.new_password)
+    current_user.credentials_updated_at = _utc_now_naive()
     db.commit()
     db.refresh(current_user)
     return current_user

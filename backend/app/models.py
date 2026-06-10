@@ -47,6 +47,7 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="user")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    credentials_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     foods: Mapped[list[Food]] = relationship(back_populates="user")

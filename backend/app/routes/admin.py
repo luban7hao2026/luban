@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, joinedload
@@ -24,6 +26,10 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 DEFAULT_TEMPLATE_USER_ID = 1
 ADMIN_ROLE = "admin"
 USER_ROLE = "user"
+
+
+def _utc_now_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _is_admin(user: User) -> bool:
@@ -140,6 +146,7 @@ def update_user_status(
         _ensure_not_last_admin_change(db, user)
 
     user.is_active = payload.is_active
+    user.credentials_updated_at = _utc_now_naive()
     db.commit()
     db.refresh(user)
     return user
@@ -161,6 +168,7 @@ def update_user_role(
         _ensure_not_last_admin_change(db, user)
 
     user.role = payload.role
+    user.credentials_updated_at = _utc_now_naive()
     db.commit()
     db.refresh(user)
     return user
@@ -175,6 +183,7 @@ def reset_user_password(
 ) -> User:
     user = _get_real_user(db, user_id)
     user.password_hash = hash_password(payload.new_password)
+    user.credentials_updated_at = _utc_now_naive()
     db.commit()
     db.refresh(user)
     return user
