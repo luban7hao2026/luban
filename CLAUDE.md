@@ -35,6 +35,7 @@ Frontend:
 - TypeScript
 - CSS in `frontend/src/styles.css`
 - Icons from `lucide-react`
+- Resizable homepage panels from `react-resizable-panels`
 - No `react-router-dom`; route selection is currently based on `window.location.pathname`
 
 Backend:
@@ -397,6 +398,24 @@ Frontend auth behavior:
 - `401` auth failures clear the token and return to login.
 - `403` permission/account-status failures keep the user on the page and display the backend error message.
 
+Homepage/lunch picker UI:
+
+- The ordinary homepage is still implemented in `LunchApp` inside `frontend/src/App.tsx`; no backend, API, or database changes are involved.
+- Desktop layout uses `react-resizable-panels` to create an editor-like three-pane workbench:
+  - Left pane: wheel, live/final picked food name, and pick button.
+  - Right top pane: latest result image and the sentence `姐姐，哇，好好吃的{selected.name}`.
+  - Right bottom pane: recent pick history.
+- The installed `react-resizable-panels` version exports `Group`, `Panel`, and `Separator`. Do not use older examples that import `PanelGroup` or `PanelResizeHandle`; those names are not available in the current dependency version.
+- Desktop panel sizes are persisted in `localStorage`:
+  - `lunch-home-main-layout-v2`
+  - `lunch-home-result-layout-v2`
+- The whole three-pane workbench also has a bottom height drag handle. Its height is persisted in `localStorage` under `lunch-home-workbench-height-v2`.
+- Workbench height is clamped between `460px` and `920px`. The default height is calculated from the viewport with `getDefaultWorkbenchHeight()`.
+- For screens `max-width: 900px`, the page keeps the simpler stacked layout instead of enabling resize handles.
+- The wheel pane uses a `ResizeObserver` on `wheelCardRef` to calculate CSS variables for the wheel size, picked-name size, pick-button width, and pick-button height. This was added because CSS-only container units did not reliably make the wheel grow when the workbench height was dragged larger.
+- The wheel pane also depends on a dedicated `.wheel-stage` wrapper plus an explicit single-column grid on `.wheel-resizable-panel .wheel-card`. This keeps the wheel visually centered after horizontal panel resizing; removing that wrapper or reverting to implicit grid columns can make the wheel stick to the left even though the SVG itself is still centered inside its own box.
+- The result and history panes use CSS container sizing and internal scrolling so images, text, and history rows adapt to pane size without expanding the outer layout.
+
 Admin console UI areas:
 
 - Dashboard.
@@ -482,6 +501,7 @@ Frontend:
 - Keep destructive actions and user status changes guarded by the shared glass-style `ConfirmDialog`.
 - Clear auth token only on `401`; keep the user on the page for `403` so disabled-account and permission messages can be shown.
 - Keep Chinese UI copy consistent with nearby UI text when editing existing screens.
+- When changing the homepage workbench, preserve the desktop resize behavior, mobile stacked fallback, `localStorage` layout keys, and the `ResizeObserver`-driven wheel sizing unless the user explicitly asks to replace that interaction model.
 
 Verification after changes:
 
@@ -507,6 +527,9 @@ For frontend behavior changes, open the local Vite app in the in-app browser whe
 - PowerShell may block `npm` script execution; use `npm.cmd`.
 - Backend background restart may require elevated/CIM process creation.
 - Frontend path handling is manual via `window.location.pathname`.
+- `react-resizable-panels` currently uses `Group`/`Panel`/`Separator`; build will fail if older `PanelGroup`/`PanelResizeHandle` names are used.
+- Homepage layout can look wrong if stale `localStorage` panel sizes from an older implementation are reused. Current keys have a `-v2` suffix to avoid that drift.
+- If the wheel looks left-aligned after homepage layout edits, inspect `.wheel-stage`, `.wheel-wrap`, and `.wheel-resizable-panel .wheel-card` together before changing the SVG; the usual cause is grid sizing/alignment, not the wheel drawing code.
 - Current admin dashboard food count intentionally de-duplicates by `Food.name`.
 - Wikimedia Commons image search and remote image download depend on outbound network access from the backend runtime.
 

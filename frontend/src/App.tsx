@@ -1,4 +1,13 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type FormEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
+import { Group, Panel, Separator, type Layout } from 'react-resizable-panels';
 import {
   AlertTriangle,
   Check,
@@ -71,6 +80,13 @@ import type {
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
 const DEFAULT_FOOD_IMAGE = '/default-food.svg';
+const MAIN_PANEL_LAYOUT_KEY = 'lunch-home-main-layout-v2';
+const RESULT_PANEL_LAYOUT_KEY = 'lunch-home-result-layout-v2';
+const WORKBENCH_HEIGHT_KEY = 'lunch-home-workbench-height-v2';
+const DEFAULT_MAIN_PANEL_LAYOUT: Layout = { wheel: 60, side: 40 };
+const DEFAULT_RESULT_PANEL_LAYOUT: Layout = { result: 58, history: 42 };
+const WORKBENCH_MIN_HEIGHT = 460;
+const WORKBENCH_MAX_HEIGHT = 920;
 const DEFAULT_FOOD_IMAGE_RULES = [
   { image: '/food-images/fish.jpg', keywords: ['鱼', '烤鱼', '红烧鱼', '清蒸鱼', 'fish'] },
   { image: '/food-images/rice.jpg', keywords: ['饭', '米饭', '盖饭', '炒饭', 'rice'] },
@@ -121,6 +137,50 @@ type FieldErrors = {
   category?: string;
   image?: string;
 };
+
+type WheelPanelLayout = {
+  buttonHeight: number;
+  buttonWidth: number;
+  nameSize: number;
+  nameStageHeight: number;
+  wheelSize: number;
+};
+
+function readStoredPanelLayout(key: string, fallback: Layout): Layout {
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return fallback;
+
+    const parsed = JSON.parse(raw) as Layout;
+    return parsed && typeof parsed === 'object' ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function storePanelLayout(key: string, layout: Layout) {
+  window.localStorage.setItem(key, JSON.stringify(layout));
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function readStoredNumber(key: string, fallback: number, min: number, max: number) {
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return fallback;
+
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? clampNumber(parsed, min, max) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function getDefaultWorkbenchHeight() {
+  return clampNumber(window.innerHeight - 210, WORKBENCH_MIN_HEIGHT, WORKBENCH_MAX_HEIGHT);
+}
 type ConfirmTone = 'danger' | 'warning';
 type ConfirmDialogConfig = {
   title: string;
@@ -246,24 +306,11 @@ function describeSector(center: number, radius: number, startAngle: number, endA
   ].join(' ');
 }
 
-function WheelText({ x, y, angle, name }: { x: number; y: number; angle: number; name: string }) {
-  return (
-    <text
-      x={x}
-      y={y}
-      textAnchor="middle"
-      dominantBaseline="middle"
-      transform={`rotate(${angle > 90 && angle < 270 ? angle + 180 : angle} ${x} ${y})`}
-    >
-      {name.length > 5 ? `${name.slice(0, 5)}...` : name}
-    </text>
-  );
-}
-
 function LunchWheel({ foods, pointerAngle }: { foods: Food[]; pointerAngle: number }) {
   const size = 420;
   const center = size / 2;
   const radius = 192;
+  const markerRadius = Math.max(18, Math.min(26, 58 / Math.sqrt(Math.max(foods.length, 1))));
 
   if (foods.length === 0) {
     return (
@@ -291,6 +338,17 @@ function LunchWheel({ foods, pointerAngle }: { foods: Food[]; pointerAngle: numb
               </clipPath>
             );
           })}
+          {foods.map((food, index) => {
+            const start = (360 / foods.length) * index;
+            const end = (360 / foods.length) * (index + 1);
+            const mid = (start + end) / 2;
+            const markerPoint = polarToPoint(center, radius * 0.64, mid);
+            return (
+              <clipPath key={`icon-${food.id}`} id={`wheel-icon-${food.id}`}>
+                <circle cx={markerPoint.x} cy={markerPoint.y} r={markerRadius} />
+              </clipPath>
+            );
+          })}
         </defs>
 
         <circle cx={center} cy={center} r={radius + 8} className="wheel-ring" filter="url(#wheelGlow)" />
@@ -298,7 +356,7 @@ function LunchWheel({ foods, pointerAngle }: { foods: Food[]; pointerAngle: numb
           const start = (360 / foods.length) * index;
           const end = (360 / foods.length) * (index + 1);
           const mid = (start + end) / 2;
-          const labelPoint = polarToPoint(center, radius * 0.64, mid);
+          const markerPoint = polarToPoint(center, radius * 0.64, mid);
 
           return (
             <g key={food.id}>
@@ -324,7 +382,22 @@ function LunchWheel({ foods, pointerAngle }: { foods: Food[]; pointerAngle: numb
                 stroke="rgba(255,255,255,0.4)"
                 strokeWidth="2"
               />
-              <WheelText x={labelPoint.x} y={labelPoint.y} angle={mid} name={food.name} />
+              <circle
+                cx={markerPoint.x}
+                cy={markerPoint.y}
+                r={markerRadius + 4}
+                className="wheel-food-icon-bg"
+              />
+              <image
+                href={getImageSrc(food.image_url)}
+                x={markerPoint.x - markerRadius}
+                y={markerPoint.y - markerRadius}
+                width={markerRadius * 2}
+                height={markerRadius * 2}
+                preserveAspectRatio="xMidYMid slice"
+                clipPath={`url(#wheel-icon-${food.id})`}
+                className="wheel-food-icon"
+              />
             </g>
           );
         })}
@@ -372,8 +445,26 @@ function LunchApp({ currentUser, onLogout }: { currentUser: User; onLogout: () =
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogConfig | null>(null);
+  const [isCompactLayout, setIsCompactLayout] = useState(false);
+  const [mainPanelLayout, setMainPanelLayout] = useState<Layout>(() =>
+    readStoredPanelLayout(MAIN_PANEL_LAYOUT_KEY, DEFAULT_MAIN_PANEL_LAYOUT),
+  );
+  const [resultPanelLayout, setResultPanelLayout] = useState<Layout>(() =>
+    readStoredPanelLayout(RESULT_PANEL_LAYOUT_KEY, DEFAULT_RESULT_PANEL_LAYOUT),
+  );
+  const [workbenchHeight, setWorkbenchHeight] = useState(() =>
+    readStoredNumber(WORKBENCH_HEIGHT_KEY, getDefaultWorkbenchHeight(), WORKBENCH_MIN_HEIGHT, WORKBENCH_MAX_HEIGHT),
+  );
+  const [wheelPanelLayout, setWheelPanelLayout] = useState<WheelPanelLayout>({
+    buttonHeight: 56,
+    buttonWidth: 340,
+    nameSize: 46,
+    nameStageHeight: 62,
+    wheelSize: 420,
+  });
   const rollTimer = useRef<number | null>(null);
   const wheelAngleRef = useRef(0);
+  const wheelCardRef = useRef<HTMLElement | null>(null);
   const searchControlRef = useRef<HTMLDivElement | null>(null);
 
   const filePreviewUrl = useMemo(() => {
@@ -409,6 +500,13 @@ function LunchApp({ currentUser, onLogout }: { currentUser: User; onLogout: () =
   }, [currentFoodPage, filteredFoods]);
 
   const activeFoods = useMemo(() => foods.filter((food) => food.is_active), [foods]);
+
+  const rollingName = useMemo(() => {
+    if (rollingId == null) return '';
+    return foods.find((food) => food.id === rollingId)?.name ?? '';
+  }, [foods, rollingId]);
+
+  const displayName = busy ? rollingName : selected?.name ?? '';
 
   const categories = useMemo(() => {
     return Array.from(
@@ -469,6 +567,65 @@ function LunchApp({ currentUser, onLogout }: { currentUser: User; onLogout: () =
   useEffect(() => {
     refresh();
   }, []);
+
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 900px)');
+    const updateLayout = () => setIsCompactLayout(query.matches);
+
+    updateLayout();
+    query.addEventListener('change', updateLayout);
+    return () => query.removeEventListener('change', updateLayout);
+  }, []);
+
+  useEffect(() => {
+    if (!wheelCardRef.current || isCompactLayout) return;
+
+    function updateWheelPanelLayout() {
+      if (!wheelCardRef.current) return;
+
+      const rect = wheelCardRef.current.getBoundingClientRect();
+      const styles = window.getComputedStyle(wheelCardRef.current);
+      const horizontalPadding = parseFloat(styles.paddingLeft) + parseFloat(styles.paddingRight);
+      const verticalPadding = parseFloat(styles.paddingTop) + parseFloat(styles.paddingBottom);
+      const availableWidth = Math.max(280, rect.width - horizontalPadding);
+      const availableHeight = Math.max(320, rect.height - verticalPadding);
+      const buttonHeight = clampNumber(availableHeight * 0.09, 56, 82);
+      const nameStageHeight = clampNumber(availableHeight * 0.13, 66, 118);
+      const verticalReserve = buttonHeight + nameStageHeight + 44;
+      const wheelSize = clampNumber(
+        Math.min(availableWidth, availableHeight - verticalReserve),
+        280,
+        680,
+      );
+      const buttonWidth = clampNumber(Math.max(wheelSize, availableWidth * 0.52), 340, availableWidth);
+      const nameSize = clampNumber(wheelSize * 0.13, 34, 82);
+
+      setWheelPanelLayout((current) => {
+        const next = {
+          buttonHeight,
+          buttonWidth,
+          nameSize,
+          nameStageHeight,
+          wheelSize,
+        };
+        const changed = (Object.keys(next) as Array<keyof WheelPanelLayout>).some(
+          (key) => Math.round(next[key]) !== Math.round(current[key]),
+        );
+
+        return changed ? next : current;
+      });
+    }
+
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) {
+        updateWheelPanelLayout();
+      }
+    });
+
+    observer.observe(wheelCardRef.current);
+    updateWheelPanelLayout();
+    return () => observer.disconnect();
+  }, [isCompactLayout]);
 
   useEffect(() => {
     setLogPage((page) => Math.min(page, totalLogPages));
@@ -814,7 +971,176 @@ function LunchApp({ currentUser, onLogout }: { currentUser: User; onLogout: () =
     }
   }
 
-  const selectedCategory = selected?.category || '未分类';
+  function startWorkbenchHeightResize(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (isCompactLayout) return;
+
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = workbenchHeight;
+    let nextHeight = startHeight;
+    const previousUserSelect = document.body.style.userSelect;
+    const previousCursor = document.body.style.cursor;
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'row-resize';
+
+    function handlePointerMove(moveEvent: PointerEvent) {
+      nextHeight = clampNumber(
+        startHeight + moveEvent.clientY - startY,
+        WORKBENCH_MIN_HEIGHT,
+        WORKBENCH_MAX_HEIGHT,
+      );
+      setWorkbenchHeight(nextHeight);
+    }
+
+    function handlePointerUp() {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      document.body.style.userSelect = previousUserSelect;
+      document.body.style.cursor = previousCursor;
+      window.localStorage.setItem(WORKBENCH_HEIGHT_KEY, String(Math.round(nextHeight)));
+    }
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+  }
+
+  const wheelPanelStyle = {
+    '--pick-name-dynamic-size': `${wheelPanelLayout.nameSize}px`,
+    '--pick-stage-dynamic-height': `${wheelPanelLayout.nameStageHeight}px`,
+    '--roll-button-dynamic-height': `${wheelPanelLayout.buttonHeight}px`,
+    '--roll-button-dynamic-width': `${wheelPanelLayout.buttonWidth}px`,
+    '--wheel-dynamic-size': `${wheelPanelLayout.wheelSize}px`,
+  } as CSSProperties;
+
+  const wheelPanel = (
+    <section className="wheel-card panel-card" ref={wheelCardRef} style={wheelPanelStyle}>
+      <div className="wheel-stage">
+        <LunchWheel foods={activeFoods} pointerAngle={wheelAngle} />
+      </div>
+
+      <div className={`pick-name-stage ${busy ? 'is-rolling' : ''} ${!busy && selected ? 'is-final' : ''}`}>
+        {displayName ? (
+          <strong key={busy ? rollingId ?? 'roll' : selected?.id ?? 'final'} className="pick-name-text">
+            {displayName}
+          </strong>
+        ) : (
+          <span className="pick-name-placeholder">点击下方按钮开始</span>
+        )}
+      </div>
+
+      <button
+        className="roll-button wheel-roll-button"
+        onClick={handlePick}
+        disabled={busy || activeFoods.length === 0}
+      >
+        <UtensilsCrossed size={20} />
+        {busy ? '正在挑选' : '帮我选一个'}
+      </button>
+    </section>
+  );
+
+  const winnerPanel = (
+    <div className={`winner-card panel-card ${rollingId ? 'is-rolling' : ''}`}>
+      {selected ? (
+        <>
+          <div className="card-label success">
+            <Check size={14} />
+            最近结果
+          </div>
+          <div className="winner-layout">
+            <div className="winner-media">
+              <FoodImage src={getImageSrc(selected.image_url)} alt={selected.name} />
+            </div>
+            <div className="winner-copy">
+              <p className="winner-quote">姐姐，哇，好好吃的{selected.name}</p>
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="winner-empty">
+          <RefreshCcw size={20} />
+          还没有结果
+        </div>
+      )}
+    </div>
+  );
+
+  const historyPanel = (
+    <aside className="history-card panel-card">
+      <div className="history-header">
+        <div className="card-label">
+          <Clock3 size={14} />
+          最近抽选
+        </div>
+        <div className="history-actions">
+          {logs.length > 0 && (
+            <button
+              type="button"
+              className={`select-page-logs ${allPagedLogsSelected ? 'active' : ''}`}
+              aria-pressed={allPagedLogsSelected}
+              onClick={togglePagedLogsSelected}
+            >
+              <span className="page-select-box">
+                {allPagedLogsSelected && <Check size={10} />}
+              </span>
+              <span>本页</span>
+            </button>
+          )}
+          <button
+            type="button"
+            className="danger-action-button"
+            disabled={selectedLogIds.length === 0}
+            onClick={removeSelectedLogs}
+          >
+            <Trash2 size={14} />
+            删除{selectedLogIds.length > 0 ? ` ${selectedLogIds.length}` : ''}
+          </button>
+          {logs.length > LOGS_PER_PAGE && (
+            <div className="pagination-controls" aria-label="最近抽选分页">
+              <span>
+                当前第 {currentLogPage} 页，{logRangeStart}-{logRangeEnd} 条记录，共 {logs.length} 条
+              </span>
+              <button
+                type="button"
+                title="上一页"
+                disabled={currentLogPage === 1}
+                onClick={() => setLogPage((page) => Math.max(1, page - 1))}
+              >
+                <ChevronLeft size={14} />
+              </button>
+              <button
+                type="button"
+                title="下一页"
+                disabled={currentLogPage === totalLogPages}
+                onClick={() => setLogPage((page) => Math.min(totalLogPages, page + 1))}
+              >
+                <ChevronRight size={14} />
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="log-list">
+        {logs.length === 0 ? (
+          <div className="state-copy small">还没有抽选记录。</div>
+        ) : (
+          pagedLogs.map((log) => (
+            <div key={log.id} className={`log-item ${selectedLogIdSet.has(log.id) ? 'selected' : ''}`}>
+              <label className="log-select">
+                <input
+                  type="checkbox"
+                  checked={selectedLogIdSet.has(log.id)}
+                  onChange={() => toggleLogSelected(log.id)}
+                />
+                <strong>{log.food.name}</strong>
+              </label>
+              <span>{formatTime(log.picked_at)}</span>
+            </div>
+          ))
+        )}
+      </div>
+    </aside>
+  );
 
   return (
     <>
@@ -855,16 +1181,34 @@ function LunchApp({ currentUser, onLogout }: { currentUser: User; onLogout: () =
         </header>
 
         <main className="dashboard">
+          {isCompactLayout ? (
+            <>
           <section className="wheel-card panel-card">
-            <LunchWheel foods={activeFoods} pointerAngle={wheelAngle} />
-          </section>
+            <div className="wheel-stage">
+              <LunchWheel foods={activeFoods} pointerAngle={wheelAngle} />
+            </div>
 
-          <section className="result-stack">
-            <button className="roll-button" onClick={handlePick} disabled={busy || activeFoods.length === 0}>
+            <div className={`pick-name-stage ${busy ? 'is-rolling' : ''} ${!busy && selected ? 'is-final' : ''}`}>
+              {displayName ? (
+                <strong key={busy ? rollingId ?? 'roll' : selected?.id ?? 'final'} className="pick-name-text">
+                  {displayName}
+                </strong>
+              ) : (
+                <span className="pick-name-placeholder">点击下方按钮开始</span>
+              )}
+            </div>
+
+            <button
+              className="roll-button wheel-roll-button"
+              onClick={handlePick}
+              disabled={busy || activeFoods.length === 0}
+            >
               <UtensilsCrossed size={20} />
               {busy ? '正在挑选' : '帮我选一个'}
             </button>
+          </section>
 
+          <section className="result-stack">
             <div className={`winner-card panel-card ${rollingId ? 'is-rolling' : ''}`}>
               {selected ? (
                 <>
@@ -877,8 +1221,7 @@ function LunchApp({ currentUser, onLogout }: { currentUser: User; onLogout: () =
                       <FoodImage src={getImageSrc(selected.image_url)} alt={selected.name} />
                     </div>
                     <div className="winner-copy">
-                      <span>{selectedCategory}</span>
-                      <strong>{selected.name}</strong>
+                      <p className="winner-quote">姐姐，哇，好好吃的{selected.name}</p>
                     </div>
                   </div>
                 </>
@@ -965,6 +1308,64 @@ function LunchApp({ currentUser, onLogout }: { currentUser: User; onLogout: () =
               </div>
             </aside>
           </section>
+            </>
+          ) : (
+            <div className="dashboard-workbench" style={{ height: `${workbenchHeight}px` }}>
+              <Group
+                id={MAIN_PANEL_LAYOUT_KEY}
+                orientation="horizontal"
+                defaultLayout={mainPanelLayout}
+                onLayoutChanged={(layout) => {
+                  setMainPanelLayout(layout);
+                  storePanelLayout(MAIN_PANEL_LAYOUT_KEY, layout);
+                }}
+                className="dashboard-panels"
+              >
+                <Panel id="wheel" defaultSize="60%" minSize="42%" className="resizable-panel wheel-resizable-panel">
+                  {wheelPanel}
+                </Panel>
+                <Separator
+                  className="resize-handle resize-handle-vertical"
+                  aria-label="Resize wheel and result panels"
+                >
+                  <span />
+                </Separator>
+                <Panel id="side" defaultSize="40%" minSize="30%" className="resizable-panel result-resizable-panel">
+                  <Group
+                    id={RESULT_PANEL_LAYOUT_KEY}
+                    orientation="vertical"
+                    defaultLayout={resultPanelLayout}
+                    onLayoutChanged={(layout) => {
+                      setResultPanelLayout(layout);
+                      storePanelLayout(RESULT_PANEL_LAYOUT_KEY, layout);
+                    }}
+                    className="result-panels"
+                  >
+                    <Panel id="result" defaultSize="58%" minSize="34%" className="resizable-panel winner-resizable-panel">
+                      {winnerPanel}
+                    </Panel>
+                    <Separator
+                      className="resize-handle resize-handle-horizontal"
+                      aria-label="Resize result and history panels"
+                    >
+                      <span />
+                    </Separator>
+                    <Panel id="history" defaultSize="42%" minSize="24%" className="resizable-panel history-resizable-panel">
+                      {historyPanel}
+                    </Panel>
+                  </Group>
+                </Panel>
+              </Group>
+              <button
+                type="button"
+                className="workbench-height-handle"
+                aria-label="Resize workbench height"
+                onPointerDown={startWorkbenchHeightResize}
+              >
+                <span />
+              </button>
+            </div>
+          )}
 
           <section className="library-section">
             <div className="toolbar panel-card">
