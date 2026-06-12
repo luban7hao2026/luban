@@ -7,7 +7,7 @@ WORKDIR /app
 
 # PyMySQL is a pure-python driver, so no system mysql client headers are needed.
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ -r requirements.txt
 
 COPY app ./app
 
