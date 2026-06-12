@@ -9,4 +9,12 @@ frontend/node_modules/
 frontend/dist/
 frontend/*.tsbuildinfo
 backend/*.log
+frontend/*.log
 frontend/.vite/
+db_backups/
+# Host-mounted runtime data on the server: real MySQL data, uploaded images,
+# and the first-run SQL dump. Never commit these.
+data/
+.deploy_stage/
+random-lunch-app.zip
+uploads.zip

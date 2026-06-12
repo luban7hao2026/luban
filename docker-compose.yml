@@ -1,0 +1,55 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: random_lunch_mysql
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: random_lunch
+      TZ: Asia/Shanghai
+    volumes:
+      # Real MySQL data lives on the host so `git pull` never touches it.
+      - ./data/mysql:/var/lib/mysql
+      # Any *.sql here is auto-imported ONLY on first start, when ./data/mysql is empty.
+      # Upload your dump as ./data/db-init/01_restore.sql before the first deploy.
+      - ./data/db-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    build:
+      context: ./backend
+    container_name: random_lunch_backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: mysql+pymysql://root:${MYSQL_ROOT_PASSWORD}@mysql:3306/random_lunch?charset=utf8mb4
+      AUTO_CREATE_TABLES: "true"
+      UPLOAD_DIR: /app/uploads
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      AUTH_SECRET: ${AUTH_SECRET}
+      ACCESS_TOKEN_MINUTES: "10080"
+      TZ: Asia/Shanghai
+    volumes:
+      # User-uploaded images live on the host so they survive rebuilds and `git pull`.
+      - ./data/uploads:/app/uploads
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: /api
+    container_name: random_lunch_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"

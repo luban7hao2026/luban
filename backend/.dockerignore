@@ -1,0 +1,10 @@
+.env
+*.env
+__pycache__/
+*.pyc
+*.pyo
+*.log
+app/uploads/*
+!app/uploads/.gitkeep
+.venv/
+venv/
