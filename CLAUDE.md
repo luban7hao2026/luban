@@ -235,7 +235,8 @@ Rules:
 - Every food belongs to exactly one user.
 - `user_id = 1` foods are default template foods.
 - New users receive copied foods from `user_id = 1` during registration.
-- Existing users' copied foods are independent from default template foods.
+- Admin edits to a default food sync by name to every real user's same-named food (name/category/image, not is_active); admin deletes of a default food delete every real user's same-named food and its pick logs. This is an admin override and intentionally also overwrites foods a user had edited.
+- Food name is unique per user (case-insensitive), enforced by the DB unique index `uq_foods_user_name (user_id, name)`.
 - `is_active = false` keeps the food but excludes it from random picks.
 
 ### pick_logs
@@ -261,6 +262,7 @@ Existing migrations:
 backend/migrations/001_multi_user_auth.sql
 backend/migrations/002_admin_user_fields.sql
 backend/migrations/003_credentials_updated_at.sql
+backend/migrations/004_unique_food_name_per_user.sql
 ```
 
 Migration 001:
@@ -282,6 +284,12 @@ Migration 003:
 
 - Adds `credentials_updated_at`.
 - Required for token invalidation after password and role changes.
+
+Migration 004:
+
+- Adds the unique index `uq_foods_user_name (user_id, name)`.
+- Enforces one food name per user (case-insensitive via the default collation).
+- Existing duplicate `(user_id, name)` rows must be removed before running it, or the `ALTER` fails with errno 1062.
 
 This project does not use Alembic. Run migrations manually and do not rerun blindly if columns already exist.
 

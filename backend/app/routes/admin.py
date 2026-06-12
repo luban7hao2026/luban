@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
@@ -27,10 +28,87 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 DEFAULT_TEMPLATE_USER_ID = 1
 ADMIN_ROLE = "admin"
 USER_ROLE = "user"
+DUPLICATE_FOOD_NAME_MESSAGE = "该食物名称已存在，请换一个名称"
 
 
 def _utc_now_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _ensure_unique_food_name(
+    db: Session,
+    user_id: int,
+    name: str,
+    exclude_id: int | None = None,
+) -> None:
+    statement = select(Food.id).where(
+        Food.user_id == user_id,
+        func.lower(Food.name) == name.lower(),
+    )
+    if exclude_id is not None:
+        statement = statement.where(Food.id != exclude_id)
+    if db.scalar(statement.limit(1)) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=DUPLICATE_FOOD_NAME_MESSAGE,
+        )
+
+
+def _commit_food_changes(db: Session) -> None:
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=DUPLICATE_FOOD_NAME_MESSAGE,
+        ) from exc
+
+
+def _sync_user_foods_on_default_update(
+    db: Session,
+    old_name: str,
+    new_name: str,
+    new_category: str | None,
+    new_image_url: str | None,
+) -> None:
+    matches = db.scalars(
+        select(Food).where(
+            Food.user_id != DEFAULT_TEMPLATE_USER_ID,
+            func.lower(Food.name) == old_name.lower(),
+        )
+    ).all()
+    renaming = new_name.lower() != old_name.lower()
+    conflict_user_ids: set[int] = set()
+    if renaming:
+        conflict_user_ids = set(
+            db.scalars(
+                select(Food.user_id).where(
+                    Food.user_id != DEFAULT_TEMPLATE_USER_ID,
+                    func.lower(Food.name) == new_name.lower(),
+                )
+            ).all()
+        )
+    for food in matches:
+        # A user who already has a food with the new name would violate the
+        # unique (user_id, name) constraint; leave their copy untouched.
+        if renaming and food.user_id in conflict_user_ids:
+            continue
+        food.name = new_name
+        food.category = new_category
+        food.image_url = new_image_url
+
+
+def _delete_user_foods_by_name(db: Session, name: str) -> None:
+    food_ids = db.scalars(
+        select(Food.id).where(
+            Food.user_id != DEFAULT_TEMPLATE_USER_ID,
+            func.lower(Food.name) == name.lower(),
+        )
+    ).all()
+    if food_ids:
+        db.execute(delete(PickLog).where(PickLog.food_id.in_(food_ids)))
+        db.execute(delete(Food).where(Food.id.in_(food_ids)))
 
 
 def _is_admin(user: User) -> bool:
@@ -274,9 +352,10 @@ def create_default_food(
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin),
 ) -> Food:
+    _ensure_unique_food_name(db, DEFAULT_TEMPLATE_USER_ID, payload.name)
     food = Food(**payload.model_dump(), user_id=DEFAULT_TEMPLATE_USER_ID)
     db.add(food)
-    db.commit()
+    _commit_food_changes(db)
     db.refresh(food)
     return food
 
@@ -289,10 +368,18 @@ def update_default_food(
     current_admin: User = Depends(get_current_admin),
 ) -> Food:
     food = _get_default_food(db, food_id)
-    for field, value in payload.model_dump(exclude_unset=True).items():
-        setattr(food, field, value)
+    data = payload.model_dump(exclude_unset=True)
+    new_name = data.get("name")
+    if new_name is not None:
+        _ensure_unique_food_name(db, DEFAULT_TEMPLATE_USER_ID, new_name, exclude_id=food.id)
 
-    db.commit()
+    old_name = food.name
+    for field, value in data.items():
+        setattr(food, field, value)
+    db.flush()
+
+    _sync_user_foods_on_default_update(db, old_name, food.name, food.category, food.image_url)
+    _commit_food_changes(db)
     db.refresh(food)
     return food
 
@@ -304,8 +391,11 @@ def delete_default_food(
     current_admin: User = Depends(get_current_admin),
 ) -> None:
     food = _get_default_food(db, food_id)
+    target_name = food.name
     db.execute(delete(PickLog).where(PickLog.food_id == food.id, PickLog.user_id == DEFAULT_TEMPLATE_USER_ID))
     db.delete(food)
+    db.flush()
+    _delete_user_foods_by_name(db, target_name)
     db.commit()
 
 
@@ -371,10 +461,14 @@ def update_user_food(
 ) -> AdminUserFoodListItem:
     food = _get_user_food(db, food_id)
     _ensure_can_manage_user_food(current_user, food)
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    new_name = data.get("name")
+    if new_name is not None:
+        _ensure_unique_food_name(db, food.user_id, new_name, exclude_id=food.id)
+    for field, value in data.items():
         setattr(food, field, value)
 
-    db.commit()
+    _commit_food_changes(db)
     db.refresh(food)
     return AdminUserFoodListItem(
         id=food.id,

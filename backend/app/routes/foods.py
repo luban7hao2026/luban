@@ -6,7 +6,8 @@ from urllib.request import Request, urlopen
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -19,6 +20,37 @@ from app.security import get_active_user, get_current_user
 router = APIRouter(prefix="/foods", tags=["foods"])
 ALLOWED_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
+DUPLICATE_FOOD_NAME_MESSAGE = "该食物名称已存在，请换一个名称"
+
+
+def _ensure_unique_food_name(
+    db: Session,
+    user_id: int,
+    name: str,
+    exclude_id: int | None = None,
+) -> None:
+    statement = select(Food.id).where(
+        Food.user_id == user_id,
+        func.lower(Food.name) == name.lower(),
+    )
+    if exclude_id is not None:
+        statement = statement.where(Food.id != exclude_id)
+    if db.scalar(statement.limit(1)) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=DUPLICATE_FOOD_NAME_MESSAGE,
+        )
+
+
+def _commit_food_changes(db: Session) -> None:
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=DUPLICATE_FOOD_NAME_MESSAGE,
+        ) from exc
 FOOD_QUERY_HINTS = {
     "鱼": "fish food",
     "鸡": "chicken dish",
@@ -62,9 +94,10 @@ def create_food(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_active_user),
 ) -> Food:
+    _ensure_unique_food_name(db, current_user.id, payload.name)
     food = Food(**payload.model_dump(), user_id=current_user.id)
     db.add(food)
-    db.commit()
+    _commit_food_changes(db)
     db.refresh(food)
     return food
 
@@ -80,10 +113,14 @@ def update_food(
     if food is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Food not found")
 
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    new_name = data.get("name")
+    if new_name is not None:
+        _ensure_unique_food_name(db, current_user.id, new_name, exclude_id=food.id)
+    for field, value in data.items():
         setattr(food, field, value)
 
-    db.commit()
+    _commit_food_changes(db)
     db.refresh(food)
     return food
 
